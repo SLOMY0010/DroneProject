@@ -1,17 +1,10 @@
 #include <Servo.h>
 #include <SoftwareSerial.h>
 
-#define MAX_THROTTLE 1800
-#define MIN_THROTTLE 1150
+#define MAX_SPEED 1800
+#define MIN_SPEED 1000
 
-void set_throttle(int throttle);
-void update_throttle(int m1, int m2, int m3, int m4);
-void calculate_update_throttle();
-
-Servo M1, M2, M3, M4;
-SoftwareSerial BT(2, 7); // Bluetooth module RX -> 7 TX -> 2
-
-// Packaging data received from controller
+// This struct is used to reconstruct the data sent by the controller
 struct Controller {
   bool x, y, a, b;
   float roll, yaw, pitch;
@@ -19,7 +12,17 @@ struct Controller {
   int PL, PR;
 };
 
+/************** Global Variables **************/
+int throttle = 0; 
+unsigned long data_waiting_time = 10000; // The drone will wait for 10s to receive from the controller, if it does not receive, it will land
+unsigned long last_received = millis();
+
+Servo M1, M2, M3, M4; // Motors configuration: M1 front-left, M2 front-right, M3 back-right, M4 back-left.
+SoftwareSerial BT(2, 7); // Bluetooth module RX -> 7 TX -> 2
+
 Controller data;
+/***********************************************/
+
 
 void setup() {
   M1.attach(5); 
@@ -37,15 +40,25 @@ void setup() {
   Serial.begin(9600);
 }
 
+
 void loop() {
+
+  // Wait for data from controller to set the motors' throttle
   if (BT.available() >= sizeof(Controller)) {
     while (BT.available()) {
 
-      // Read data into the data Controller struct
+      // Read Bytes into the data Controller struct
       BT.readBytes((char *) &data, sizeof(data));
       calculate_update_throttle();
     }
+    last_received = millis();
   }
+
+  // If 10s went by without receiving data, and the throttle have already been changed by previously received data, land the drone.
+  if (millis() - last_received >= data_waiting_time && throttle > MIN_SPEED && throttle <= MAX_SPEED) {
+    descend();
+  }
+
   Serial.print("Lx: "); Serial.print(data.JLx);
   Serial.print("    Ly: "); Serial.print(data.JLy);
   Serial.print("    Rx: "); Serial.print(data.JRx);
@@ -53,16 +66,35 @@ void loop() {
 }
 
 
+
+
+/**************************** Functions ****************************/ 
 void calculate_update_throttle() {
   int m1, m2, m3, m4;
 
-  m1 = throttle + pitch + roll + yaw   // Front-left
-  m2 = throttle + pitch - roll - yaw   // Front-right
-  m3 = throttle - pitch - roll + yaw   // Back-right
-  m4 = throttle - pitch + roll - yaw   // Back-left
+  int pitch = data.JRy, roll = data.JRx, yaw = data.JLx;
+  throttle = data.JLy; // A global variable
+
+  m1 = constrain(throttle + pitch + roll + yaw, MIN_SPEED, MAX_SPEED);   // Front-left
+  m2 = constrain(throttle + pitch - roll - yaw, MIN_SPEED, MAX_SPEED);   // Front-right
+  m3 = constrain(throttle - pitch - roll + yaw, MIN_SPEED, MAX_SPEED);   // Back-right
+  m4 = constrain(throttle - pitch + roll - yaw, MIN_SPEED, MAX_SPEED);   // Back-left
+
+  // Update the speed of each motor
+  update_throttle(m1, m2, m3, m4);
 }
 
 
+void descend() {
+  // Slowly decrease the throttle of all motors equally
+  for (int i = throttle; i >= MIN_SPEED; i -= 20) {
+    update_throttle(i, i, i, i);
+    delay(1000);
+  }
+
+  // Reset throttle
+  throttle = MIN_SPEED;
+}
 
 
 void update_throttle(int m1, int m2, int m3, int m4) {
@@ -70,12 +102,4 @@ void update_throttle(int m1, int m2, int m3, int m4) {
   M2.writeMicroseconds(m2);
   M3.writeMicroseconds(m3);
   M4.writeMicroseconds(m4);
-}
-
-
-void set_throttle(int throttle) {
-  M1.writeMicroseconds(throttle);
-  M2.writeMicroseconds(throttle);
-  M3.writeMicroseconds(throttle);
-  M4.writeMicroseconds(throttle);
 }

@@ -1,18 +1,18 @@
 #include <Wire.h>
 #include <SoftwareSerial.h>
 
+#define MAX_SPEED 1800 // Signal value for maximum motor speed is 1800us
+#define MIN_SPEED 1000 // Signal value for minimum motor speed is 1000us
+
 #define led 9
+
+// buttons pins
 #define x_pin 10
 #define y_pin 12
 #define a_pin 8
 #define b_pin 11
 
-void read_buttons();
-void read_MPU();
-void read_joysticks();
-void read_potens();
-
-// Packaging data to send to drone.
+// This struct is used to encapsulate all data into one type to send it via bluetooth
 struct Controller {
   bool x, y, a, b;
   float roll, yaw, pitch;
@@ -20,27 +20,42 @@ struct Controller {
   int PL, PR;
 };
 
-// Global Variables:
-  // For gyroscope calibration
+/**************************** Global Variables ****************************/
+
+// To fix Joysticks' offset
+int JLx_offset = 0, JLy_offset = 0, JRx_offset = 0, JRy_offset = 0;
+
+// For gyroscope calibration
 float gyro_x_bias = 0;
 float gyro_y_bias = 0;
 float gyro_z_bias = 0;
 
-  // For buttons debouncing
+// For buttons debouncing
 unsigned long lastTimeXChanged = millis(), lastTimeYChanged = millis(), lastTimeAChanged = millis(), lastTimeBChanged = millis();
 unsigned long debounceDuration = 50;
 bool lastXState, lastYState, lastAState, lastBState;
 
-  // To package controller data
-Controller data;
 
 SoftwareSerial BT(3, 2);  // Bluetooth module RX -> D2, TX -> D3
+
+// For timing bluetooth transmission
 unsigned long bt_last_sent = millis(); 
 unsigned long bt_sending_interval = 20; // How often to send data to drone.
 
+// To package controller data
+Controller data;
+
+/***************************************************************************/
+
 
 void setup() {
-  // put your setup code here, to run once:
+  /*
+  * When the board is powered, the red LED will be on, meaning that the controller must not be touched because it is doing calibrations.
+  * After those processes are done, the red LED will blink twice, then will stay on. After that, the throttle 
+  * joystick (Left joystick) should be moved down to the zero and held at that position, after some seconds the LED
+  * will turn on meaning that the controller starts working and will control the drone immediately. This is a safety measure.
+  */
+
   digitalWrite(led, HIGH);
 
   pinMode(led, OUTPUT);
@@ -73,7 +88,6 @@ void setup() {
   Wire.write(0x8); // Full scale range: 500 degs/s or LSB 65.5
   Wire.endTransmission();
 
-  calibrate_gyro();
 
   // For buttons debouncing
   lastXState = digitalRead(x_pin);
@@ -82,30 +96,53 @@ void setup() {
   lastBState = digitalRead(b_pin);
 
   BT.begin(9600); // Begin bluetooth transmission.
-  delay(3000);
+
+  // Calibration processes
+  calibrate_gyro();
+  calculate_joysticks_offset();
+  
+  /*
+  * The calibration above takes time, to ensure that the user doesn't change the state of the controller while calibrating,
+  * the red LED will blink twice when the calibration is done and the controller is ready to use.
+  */
+
+  digitalWrite(led, LOW);
+  delay(300);
+  digitalWrite(led, HIGH);
+  delay(300);
+  digitalWrite(led, LOW);
+  delay(300);
+  digitalWrite(led, HIGH);
+
+  // The Throttle Joystick must be at lowest position in order to start the code
+  while (analogRead(A1) != 0) {
+    delay(3000);
+  }
   digitalWrite(led, LOW);
 }
 
 void loop() {
   
-
+  // Get data from all input devices
   read_potens();
   read_MPU();
   read_joysticks();
   read_buttons();
 
+  // Send data to drone via bluetooth in each time interval
   if (millis() - bt_last_sent >= bt_sending_interval) {
-    // Send data:
+    // Send data to drone:
     BT.write((char *) &data, sizeof(Controller));
-    //BT.print(data.JLx); BT.print(data.JLy);
-    Serial.println("Sent");
     bt_last_sent = millis();
   }
-
-  delay(100);
 }
 
 
+
+
+/**************************** Functions ****************************/
+
+// Reads data from the inertia unit.
 void read_MPU() {
   int16_t gyro_x;
   int16_t gyro_y;
@@ -162,14 +199,33 @@ void calibrate_gyro() {
   gyro_z_bias = (float) z_sum / 2000;
 }
 
+
+// This function calculates how off the joysticks reading are from the middle position (512)
+void calculate_joysticks_offset() {
+  int samples = 50;
+  for (int i = 0; i < samples; i++) {
+    JRx_offset += analogRead(A3);
+    JRy_offset += analogRead(A2);
+    JLx_offset += analogRead(A0);
+  }
+  JRx_offset = JRx_offset / samples;
+  JRy_offset = JRy_offset / samples;
+  JLx_offset = JLx_offset / samples;
+}
+
 void read_joysticks() {
-  data.JRx = analogRead(A3);
-  data.JRy = analogRead(A2);
-  data.JLx = analogRead(A0);
-  data.JLy = analogRead(A1);
-  // Serial.print("Rx: " ); Serial.print(data.JRx); Serial.print("  Ry: "); Serial.print(data.JRy);
-  // Serial.print("    Lx: " ); Serial.print(data.JLx); Serial.print("  Ly: "); Serial.print(data.JLy);
-  // Serial.println();
+
+  // I decided to calculate the values to be used in the mixing formula for the motors speed here in the controller instead of doing it in the drone
+  // The values of the Pitch, Roll, and Yaw have to be clipped (so that it does not change the speed too much) and centered at zero.
+  // Throttle is 0 when the left joystick is pushed down. 
+  data.JRx = map(constrain(analogRead(A3) - JRx_offset, -512, 511), -512, 511, -250, 250);
+  data.JRy = map(constrain(analogRead(A2) - JRy_offset, -512, 511), -512, 511, -250, 250);
+  data.JLx = map(constrain(analogRead(A0) - JLx_offset, -512, 511), -512, 511, -250, 250);
+  data.JLy = map(analogRead(A1), 0, 1023, 1000, MAX_SPEED); // Throttle input
+
+  Serial.print("Rx: " ); Serial.print(data.JRx); Serial.print("  Ry: "); Serial.print(data.JRy);
+  Serial.print("    Lx: " ); Serial.print(data.JLx); Serial.print("  Ly: "); Serial.print(data.JLy);
+  Serial.println();
 }
 
 void read_buttons() {
@@ -198,6 +254,7 @@ bool debounce(int btn, bool *lastBtnState,unsigned long *lastTimeBtnChanged) {
 }
 
 
+// This function reads the input from the two potentiometers.
 void read_potens() {
   data.PL = analogRead(A6);
   data.PR = analogRead(A7);
