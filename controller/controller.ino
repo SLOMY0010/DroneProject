@@ -1,4 +1,5 @@
 #include <Wire.h>
+#include <SoftwareSerial.h>
 
 #define led 9
 #define x_pin 10
@@ -11,6 +12,7 @@ void read_MPU();
 void read_joysticks();
 void read_potens();
 
+// Packaging data to send to drone.
 struct Controller {
   bool x, y, a, b;
   float roll, yaw, pitch;
@@ -31,6 +33,10 @@ bool lastXState, lastYState, lastAState, lastBState;
 
   // To package controller data
 Controller data;
+
+SoftwareSerial BT(3, 2);  // Bluetooth module RX -> D2, TX -> D3
+unsigned long bt_last_sent = millis(); 
+unsigned long bt_sending_interval = 20; // How often to send data to drone.
 
 
 void setup() {
@@ -75,6 +81,7 @@ void setup() {
   lastAState = digitalRead(a_pin);
   lastBState = digitalRead(b_pin);
 
+  BT.begin(9600); // Begin bluetooth transmission.
   delay(3000);
   digitalWrite(led, LOW);
 }
@@ -83,9 +90,18 @@ void loop() {
   
 
   read_potens();
-  // read_MPU();
-  // read_joysticks();
-  // read_buttons();
+  read_MPU();
+  read_joysticks();
+  read_buttons();
+
+  if (millis() - bt_last_sent >= bt_sending_interval) {
+    // Send data:
+    BT.write((char *) &data, sizeof(Controller));
+    //BT.print(data.JLx); BT.print(data.JLy);
+    Serial.println("Sent");
+    bt_last_sent = millis();
+  }
+
   delay(100);
 }
 
@@ -117,9 +133,9 @@ void read_MPU() {
   pitch = (float) (gyro_y - gyro_y_bias) / 65.5;
   yaw = (float) (gyro_z - gyro_z_bias) / 65.5;
 
-  Serial.print("Roll: "); Serial.print(roll);
-  Serial.print("    Yaw: "); Serial.print(yaw);
-  Serial.print("    Pitch: "); Serial.println(pitch);
+  // Serial.print("Roll: "); Serial.print(roll);
+  // Serial.print("    Yaw: "); Serial.print(yaw);
+  // Serial.print("    Pitch: "); Serial.println(pitch);
 }
 
 
@@ -151,9 +167,9 @@ void read_joysticks() {
   data.JRy = analogRead(A2);
   data.JLx = analogRead(A0);
   data.JLy = analogRead(A1);
-  Serial.print("Rx: " ); Serial.print(data.JRx); Serial.print("  Ry: "); Serial.print(data.JRy);
-  Serial.print("    Lx: " ); Serial.print(data.JLx); Serial.print("  Ly: "); Serial.print(data.JLy);
-  Serial.println();
+  // Serial.print("Rx: " ); Serial.print(data.JRx); Serial.print("  Ry: "); Serial.print(data.JRy);
+  // Serial.print("    Lx: " ); Serial.print(data.JLx); Serial.print("  Ly: "); Serial.print(data.JLy);
+  // Serial.println();
 }
 
 void read_buttons() {
@@ -162,10 +178,10 @@ void read_buttons() {
   data.a = debounce(a_pin, &lastAState, &lastTimeAChanged);
   data.b = debounce(b_pin, &lastBState, &lastTimeBChanged);
 
-  Serial.print("x: "); Serial.print(data.x);
-  Serial.print("    y: "); Serial.print(data.y);
-  Serial.print("    a: "); Serial.print(data.a);
-  Serial.print("    b: "); Serial.println(data.b);
+  // Serial.print("x: "); Serial.print(data.x);
+  // Serial.print("    y: "); Serial.print(data.y);
+  // Serial.print("    a: "); Serial.print(data.a);
+  // Serial.print("    b: "); Serial.println(data.b);
 }
 
 bool debounce(int btn, bool *lastBtnState,unsigned long *lastTimeBtnChanged) {
@@ -185,6 +201,6 @@ bool debounce(int btn, bool *lastBtnState,unsigned long *lastTimeBtnChanged) {
 void read_potens() {
   data.PL = analogRead(A6);
   data.PR = analogRead(A7);
-  Serial.print("PL: "); Serial.print(data.PL);
-  Serial.print("    PR: "); Serial.println(data.PR);
+  // Serial.print("PL: "); Serial.print(data.PL);
+  // Serial.print("    PR: "); Serial.println(data.PR);
 }
