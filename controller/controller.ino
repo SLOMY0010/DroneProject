@@ -38,7 +38,7 @@ unsigned long debounceDuration = 100;
 bool lastXState, lastYState, lastAState, lastBState;
 
 
-SoftwareSerial BT(3, 2);  // Bluetooth module RX -> D2, TX -> D3
+SoftwareSerial BT(3, 2);  // Bluetooth module TX -> 3 RX -> 2
 
 // For timing bluetooth transmission
 unsigned long bt_last_sent = millis(); 
@@ -132,7 +132,7 @@ void loop() {
   read_buttons();
 
   // Only send if there is change, if no change after 3 seconds
-  // send again to le the drone  know that the connection is working
+  // send again to let the drone  know that the connection is working
   if (new_input || millis() - bt_last_sent >= 3000) {
   // Send data to drone via bluetooth in each time interval
     if (millis() - bt_last_sent >= bt_sending_interval) {

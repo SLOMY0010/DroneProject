@@ -18,7 +18,7 @@ unsigned long data_waiting_time = 10000; // The drone will wait for 10s to recei
 unsigned long last_received = millis();
 
 Servo M1, M2, M3, M4; // Motors configuration: M1 front-left, M2 front-right, M3 back-right, M4 back-left.
-SoftwareSerial BT(2, 7); // Bluetooth module RX -> 7 TX -> 2
+SoftwareSerial BT(2, 7); // Bluetooth module TX -> 2 RX -> 7
 
 Controller data;
 /***********************************************/
@@ -48,25 +48,12 @@ void setup() {
 
 
 void loop() {
-  // bool set = false;
-
-  // if (set == false) {
-  //   M1.writeMicroseconds(1300);
-  //   M2.writeMicroseconds(1300);
-  //   M3.writeMicroseconds(1300);
-  //   M4.writeMicroseconds(1300);
-  //   set = true;
-  // }
 
   // Wait for data from controller to set the motors' throttle
   if (BT.available() >= sizeof(Controller)) {
     Serial.println(millis() - last_received);
     // Read Bytes into the data Controller struct
     BT.readBytes((char *) &data, sizeof(data));
-    // M1.writeMicroseconds(1300);
-    // M2.writeMicroseconds(1300);
-    // M3.writeMicroseconds(1300);
-    // M4.writeMicroseconds(1300);
     calculate_update_throttle();
     
     last_received = millis();
