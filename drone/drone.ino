@@ -30,6 +30,12 @@ void setup() {
   M3.attach(10);
   M4.attach(9); 
 
+  M1.writeMicroseconds(2000); // Arm ESC with minimum throttle
+  M2.writeMicroseconds(2000); // Arm ESC with minimum throttle
+  M3.writeMicroseconds(2000); // Arm ESC with minimum throttle
+  M4.writeMicroseconds(2000); // Arm ESC with minimum throttle
+  delay(2000); // Give ESC time to arm
+
   M1.writeMicroseconds(1000); // Arm ESC with minimum throttle
   M2.writeMicroseconds(1000); // Arm ESC with minimum throttle
   M3.writeMicroseconds(1000); // Arm ESC with minimum throttle
@@ -42,27 +48,39 @@ void setup() {
 
 
 void loop() {
+  // bool set = false;
+
+  // if (set == false) {
+  //   M1.writeMicroseconds(1300);
+  //   M2.writeMicroseconds(1300);
+  //   M3.writeMicroseconds(1300);
+  //   M4.writeMicroseconds(1300);
+  //   set = true;
+  // }
 
   // Wait for data from controller to set the motors' throttle
   if (BT.available() >= sizeof(Controller)) {
-    while (BT.available()) {
-
-      // Read Bytes into the data Controller struct
-      BT.readBytes((char *) &data, sizeof(data));
-      calculate_update_throttle();
-    }
+    Serial.println(millis() - last_received);
+    // Read Bytes into the data Controller struct
+    BT.readBytes((char *) &data, sizeof(data));
+    // M1.writeMicroseconds(1300);
+    // M2.writeMicroseconds(1300);
+    // M3.writeMicroseconds(1300);
+    // M4.writeMicroseconds(1300);
+    calculate_update_throttle();
+    
     last_received = millis();
   }
 
   // If 10s went by without receiving data, and the throttle have already been changed by previously received data, land the drone.
-  if (millis() - last_received >= data_waiting_time && throttle > MIN_SPEED && throttle <= MAX_SPEED) {
+  if (millis() - last_received >= data_waiting_time && throttle >= MIN_SPEED && throttle <= MAX_SPEED) {
     descend();
   }
 
-  Serial.print("Lx: "); Serial.print(data.JLx);
-  Serial.print("    Ly: "); Serial.print(data.JLy);
-  Serial.print("    Rx: "); Serial.print(data.JRx);
-  Serial.print("    Ry: "); Serial.println(data.JRy);
+  // Serial.print("Lx: "); Serial.print(data.JLx);
+  // Serial.print("    Ly: "); Serial.print(data.JLy);
+  // Serial.print("    Rx: "); Serial.print(data.JRx);
+  // Serial.print("    Ry: "); Serial.println(data.JRy);
 }
 
 
@@ -81,6 +99,11 @@ void calculate_update_throttle() {
   m4 = constrain(throttle - pitch + roll - yaw, MIN_SPEED, MAX_SPEED);   // Back-left
 
   // Update the speed of each motor
+  Serial.print("  m1: "); Serial.print(m1);
+  Serial.print("  m2: "); Serial.print(m2);
+  Serial.print("  m3: "); Serial.print(m3);
+  Serial.print("  m4: "); Serial.println(m4);
+  
   update_throttle(m1, m2, m3, m4);
 }
 

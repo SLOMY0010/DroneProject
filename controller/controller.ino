@@ -22,6 +22,8 @@ struct Controller {
 
 /**************************** Global Variables ****************************/
 
+bool new_input = false;
+
 // To fix Joysticks' offset
 int JLx_offset = 0, JLy_offset = 0, JRx_offset = 0, JRy_offset = 0;
 
@@ -32,7 +34,7 @@ float gyro_z_bias = 0;
 
 // For buttons debouncing
 unsigned long lastTimeXChanged = millis(), lastTimeYChanged = millis(), lastTimeAChanged = millis(), lastTimeBChanged = millis();
-unsigned long debounceDuration = 50;
+unsigned long debounceDuration = 100;
 bool lastXState, lastYState, lastAState, lastBState;
 
 
@@ -40,7 +42,7 @@ SoftwareSerial BT(3, 2);  // Bluetooth module RX -> D2, TX -> D3
 
 // For timing bluetooth transmission
 unsigned long bt_last_sent = millis(); 
-unsigned long bt_sending_interval = 20; // How often to send data to drone.
+unsigned long bt_sending_interval = 50; // How often to send data to drone.
 
 // To package controller data
 Controller data;
@@ -129,11 +131,16 @@ void loop() {
   read_joysticks();
   read_buttons();
 
+  // Only send if there is change, if no change after 3 seconds
+  // send again to le the drone  know that the connection is working
+  if (new_input || millis() - bt_last_sent >= 3000) {
   // Send data to drone via bluetooth in each time interval
-  if (millis() - bt_last_sent >= bt_sending_interval) {
-    // Send data to drone:
-    BT.write((char *) &data, sizeof(Controller));
-    bt_last_sent = millis();
+    if (millis() - bt_last_sent >= bt_sending_interval) {
+      // Send data to drone:
+      BT.write((char *) &data, sizeof(Controller));
+      bt_last_sent = millis();
+    }
+    new_input = false;
   }
 }
 
@@ -218,10 +225,23 @@ void read_joysticks() {
   // I decided to calculate the values to be used in the mixing formula for the motors speed here in the controller instead of doing it in the drone
   // The values of the Pitch, Roll, and Yaw have to be clipped (so that it does not change the speed too much) and centered at zero.
   // Throttle is 0 when the left joystick is pushed down. 
-  data.JRx = map(constrain(analogRead(A3) - JRx_offset, -512, 511), -512, 511, -250, 250);
-  data.JRy = map(constrain(analogRead(A2) - JRy_offset, -512, 511), -512, 511, -250, 250);
-  data.JLx = map(constrain(analogRead(A0) - JLx_offset, -512, 511), -512, 511, -250, 250);
-  data.JLy = map(analogRead(A1), 0, 1023, 1000, MAX_SPEED); // Throttle input
+  int JRx_new = map(constrain(analogRead(A3) - JRx_offset, -512, 511), -512, 511, -250, 250);
+  int JRy_new = map(constrain(analogRead(A2) - JRy_offset, -512, 511), -512, 511, -250, 250);
+  int JLx_new = map(constrain(analogRead(A0) - JLx_offset, -512, 511), -512, 511, -250, 250);
+  int JLy_new = map(analogRead(A1), 0, 1023, 1000, MAX_SPEED); // Throttle input
+
+  if (
+    abs(JRx_new - data.JRx) >= 50 ||
+    abs(JRy_new - data.JRy) >= 50 ||
+    abs(JLx_new - data.JLx) >= 50 ||
+    abs(JLy_new - data.JLy) >= 50 
+  ) {
+    data.JRx = JRx_new;
+    data.JRy = JRy_new;
+    data.JLx = JLx_new;
+    data.JLy = JLy_new;
+    new_input = true;
+  }
 
   Serial.print("Rx: " ); Serial.print(data.JRx); Serial.print("  Ry: "); Serial.print(data.JRy);
   Serial.print("    Lx: " ); Serial.print(data.JLx); Serial.print("  Ly: "); Serial.print(data.JLy);
