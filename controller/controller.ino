@@ -224,7 +224,7 @@ void calibrate_gyro() {
 
 // This function calculates how off the joysticks reading are from the middle position (512)
 void calculate_joysticks_offset() {
-  int samples = 50;
+  int samples = 100;
   for (int i = 0; i < samples; i++) {
     JRx_offset += analogRead(A3);
     JRy_offset += analogRead(A2);
@@ -240,16 +240,17 @@ void read_joysticks() {
   // I decided to calculate the values to be used in the mixing formula for the motors speed here in the controller instead of doing it in the drone
   // The values of the Pitch, Roll, and Yaw have to be clipped (so that it does not change the speed too much) and centered at zero.
   // Throttle is 0 when the left joystick is pushed down. 
-  int JRx_new = map(constrain(analogRead(A3) - JRx_offset, -512, 511), -512, 511, -250, 250);
-  int JRy_new = map(constrain(analogRead(A2) - JRy_offset, -512, 511), -512, 511, -250, 250);
-  int JLx_new = map(constrain(analogRead(A0) - JLx_offset, -512, 511), -512, 511, -250, 250);
+  int JRx_new = map(constrain(analogRead(A3) - JRx_offset, -512, 511), -512, 511, -200, 200);
+  int JRy_new = map(constrain(analogRead(A2) - JRy_offset, -512, 511), -512, 511, -200, 200);
+  int JLx_new = map(constrain(analogRead(A0) - JLx_offset, -512, 511), -512, 511, -200, 200);
   int JLy_new = map(analogRead(A1), 0, 1023, 1000, MAX_SPEED); // Throttle input
 
+  int change_tolerance = 50; // if a value changes by this amount, update data and send to drone
   if (
-    abs(JRx_new - data.JRx) >= 50 ||
-    abs(JRy_new - data.JRy) >= 50 ||
-    abs(JLx_new - data.JLx) >= 50 ||
-    abs(JLy_new - data.JLy) >= 50 
+    abs(JRx_new - data.JRx) >= change_tolerance ||
+    abs(JRy_new - data.JRy) >= change_tolerance ||
+    abs(JLx_new - data.JLx) >= change_tolerance ||
+    abs(JLy_new - data.JLy) >= change_tolerance 
   ) {
     data.JRx = JRx_new;
     data.JRy = JRy_new;
@@ -282,6 +283,7 @@ bool debounce(int btn, bool *lastBtnState,unsigned long *lastTimeBtnChanged) {
     if (btnState != *lastBtnState) {
       *lastBtnState = btnState;
       *lastTimeBtnChanged = millis();
+      new_input = true;
     }
   }
 
