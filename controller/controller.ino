@@ -18,6 +18,7 @@ struct Controller {
   float roll, yaw, pitch;
   int JLx, JLy, JRx, JRy;
   int PL, PR;
+  uint8_t checksum;
 };
 
 /**************************** Global Variables ****************************/
@@ -123,6 +124,7 @@ void setup() {
   digitalWrite(led, LOW);
 }
 
+
 void loop() {
   
   // Get data from all input devices
@@ -132,11 +134,12 @@ void loop() {
   read_buttons();
 
   // Only send if there is change, if no change after 3 seconds
-  // send again to let the drone  know that the connection is working
+  // send again to let the drone know that the connection is working
   if (new_input || millis() - bt_last_sent >= 3000) {
   // Send data to drone via bluetooth in each time interval
     if (millis() - bt_last_sent >= bt_sending_interval) {
       // Send data to drone:
+      data.checksum = compute_checksum(data);
       BT.write((char *) &data, sizeof(Controller));
       bt_last_sent = millis();
     }
@@ -148,6 +151,18 @@ void loop() {
 
 
 /**************************** Functions ****************************/
+
+
+// For data validation in the drone side
+uint8_t compute_checksum(const Controller &data) {
+  const uint8_t *ptr = (const uint8_t *) &data;
+  uint8_t sum = 0;
+
+  for (size_t i = 0; i < sizeof(Controller) - 1; ++i) 
+    sum ^= ptr[i];
+
+  return sum;
+}
 
 // Reads data from the inertia unit.
 void read_MPU() {
