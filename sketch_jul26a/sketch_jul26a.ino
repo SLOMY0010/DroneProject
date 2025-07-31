@@ -4,10 +4,34 @@
 float gyro_x_bias = 0;
 float gyro_y_bias = 0;
 float gyro_z_bias = 0;
+
 // For accelerometer calibration
 float acc_x_bias = 0;
 float acc_y_bias = 0;
 float acc_z_bias = 0;
+
+// For the Kalman filter
+
+  unsigned long last_time_kf = micros();
+
+  // For roll
+  float angle_roll = 0.0;
+  float bias_roll = 0.0;
+  float P_roll[2][2] = { {1, 0}, {0, 1} };
+
+  // For pitch
+  float angle_pitch = 0.0;
+  float bias_pitch = 0.0;
+  float P_pitch[2][2] = { {1, 0}, {0, 1} };
+
+  // Kalman tuning constants (shared)
+  float Q_angle = 0.004;
+  float Q_bias  = 0.003;
+  float R_measure = 0.04;
+
+  float gy_roll, gy_yaw, gy_pitch; // Stores rotation rates in each axis (angular velocity)
+  float acc_roll, acc_yaw, acc_pitch; // Stores acceleration in each axis
+
 
 void setup() {
   Wire.setClock(400000); // For the MPU-6050
@@ -40,26 +64,28 @@ void setup() {
 }
 
 void loop() {
-  // put your main code here, to run repeatedly:
-  read_MPU();
+  float dt = (micros() - last_time_kf) / 1000000.0;
+  last_time_kf = micros();
+
+  read_gyro();
+  read_acc();
+
+  angle_roll = kalman_filter(acc_roll, gy_roll, dt, angle_roll, bias_roll, P_roll);
+  angle_pitch = kalman_filter(acc_pitch, gy_pitch, dt, angle_pitch, bias_pitch, P_pitch);
+
+  Serial.print("Kalman Roll: "); Serial.print(angle_roll);
+  Serial.print("    Kalman Pitch: "); Serial.println(angle_pitch);
+  
 }
 
 
-// Reads data from the inertia unit.
-void read_MPU() {
-
+void read_gyro() {
   // To store raw data from the gyroscope
   int16_t gyro_x;
   int16_t gyro_y;
   int16_t gyro_z;
 
-  // To store raw data from the accelerometer
-  int16_t acc_x;
-  int16_t acc_y;
-  int16_t acc_z;
-
-  float gy_roll, gy_yaw, gy_pitch; // Stores rotation rates in each axis (angular velocity)
-  float acc_roll, acc_yaw, acc_pitch; // Stores acceleration in each axis
+  
 
   // Read rotation rates from the gyroscope
   Wire.beginTransmission(0x68);
@@ -71,13 +97,24 @@ void read_MPU() {
   gyro_y = Wire.read() << 8 | Wire.read();
   gyro_z = Wire.read() << 8 | Wire.read();
 
-  gy_roll = (float) (gyro_x - gyro_x_bias) / 65.5;
-  gy_pitch = (float) (gyro_y - gyro_y_bias) / 65.5;
-  gy_yaw = (float) (gyro_z - gyro_z_bias) / 65.5;
+  // Rates:
+  // TODO if the chip is placed properly on the PCB, swap gy_roll and gy_pitch
+  gy_pitch = (float) gyro_x / 65.5; // Notice that we're not subracting the bias, because the Kalman filter should handle it
+  gy_roll = (float) gyro_y / 65.5;
+  gy_yaw = (float) gyro_z / 65.5;
 
-  // Serial.print("Roll: "); Serial.print(roll);
-  // Serial.print("    Yaw: "); Serial.print(yaw);
-  // Serial.print("    Pitch: "); Serial.println(pitch);
+  // Serial.print("Roll: "); Serial.print(gy_roll);
+  // Serial.print("    Yaw: "); Serial.print(gy_yaw);
+  // Serial.print("    Pitch: "); Serial.println(gy_pitch);
+
+}
+
+
+void read_acc() {
+  // To store raw data from the accelerometer
+  int16_t acc_x;
+  int16_t acc_y;
+  int16_t acc_z;
 
   // Read data from the accelerometer
   Wire.beginTransmission(0x68);
@@ -94,22 +131,21 @@ void read_MPU() {
   acc_y = Wire.read() << 8 | Wire.read();
   acc_z = Wire.read() << 8 | Wire.read();
 
-  acc_roll = (float) acc_x / 4096 - acc_x_bias;
-  acc_pitch= (float) acc_y / 4096 - acc_y_bias;
-  acc_yaw = (float) acc_z / 4096 - acc_z_bias + 1; // Because when the drone is idle, it will have gravitational acceleration along the z axis
-
-  // Serial.print("acc_x: "); Serial.print(acc_roll);
-  // Serial.print("    acc_y: "); Serial.print(acc_pitch);
-  // Serial.print("    acc_z: ");Serial.println(acc_yaw);
+  float acc_x_clean = (float) acc_x / 4096 - acc_x_bias; 
+  float acc_y_clean= (float) acc_y / 4096 - acc_y_bias;
+  float acc_z_clean = (float) acc_z / 4096 - acc_z_bias + 1; // Because when the drone is idle, it will have gravitational acceleration along the z axis
 
   // This calculates the angles by using the accelerometer
   // TODO change roll and pitch variable names, this is because the HW-290 unit is not placed in the right direction on the breadboard
-  float pitch_angle = atan(acc_pitch / sqrt(acc_roll * acc_roll + acc_yaw * acc_yaw)) * 180 / PI;
-  float roll_angle = -atan(acc_roll / sqrt(acc_pitch * acc_pitch + acc_yaw * acc_yaw)) * 180 / PI;
+  // Signs depend on the way the chip is mounted
+  acc_pitch = atan2(acc_y_clean, sqrt(acc_x_clean * acc_x_clean + acc_z_clean * acc_z_clean)) * 180 / PI;
+  acc_roll = -atan2(acc_x_clean, sqrt(acc_y_clean * acc_y_clean + acc_z_clean * acc_z_clean)) * 180 / PI;
 
-  Serial.print("Roll angle: "); Serial.print(roll_angle);
-  Serial.print("    Pitch angle: "); Serial.println(pitch_angle);
+  // Serial.print("Roll angle: "); Serial.print(roll_angle);
+  // Serial.print("    Pitch angle: "); Serial.println(pitch_angle);
+
 }
+
 
 
 void calibrate_gyro() {
@@ -159,4 +195,128 @@ void calibrate_acc() {
   acc_x_bias = ((float) x_sum / samples) / 4069.0;
   acc_y_bias = ((float) y_sum / samples) / 4069.0;
   acc_z_bias = ((float) z_sum / samples) / 4069.0;
+}
+
+
+float kalman_filter(float acc_angle, float gyro_rate, float dt, float &angle, float &bias, float P[2][2]) {
+
+  // Prediction step
+  angle += dt * (gyro_rate - bias);
+
+  // Update error covariance
+  P[0][0] += dt * (dt * P[1][1] - P[1][0] - P[0][1] + Q_angle);
+  P[0][1] -= dt * P[1][1];
+  P[1][0] -= dt * P[1][1];
+  P[1][1] += Q_bias * dt;
+
+  // Calculate the Kalman gain
+  float S = P[0][0] + R_measure;
+  float K[2];
+  K[0] = P[0][0] / S;
+  K[1] = P[1][0] / S;
+
+  // Measurement update
+  float y = acc_angle - angle;
+  angle += K[0] * y;
+  bias  += K[1] * y;
+
+  // Update P
+  float P00_temp = P[0][0];
+  float P01_temp = P[0][1];
+
+  P[0][0] -= K[0] * P00_temp;
+  P[0][1] -= K[0] * P01_temp;
+  P[1][0] -= K[1] * P00_temp;
+  P[1][1] -= K[1] * P01_temp;
+
+  return angle;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// Reads data from the inertia unit.
+void read_MPU() {
+
+  // To store raw data from the gyroscope
+  int16_t gyro_x;
+  int16_t gyro_y;
+  int16_t gyro_z;
+
+  // To store raw data from the accelerometer
+  int16_t acc_x;
+  int16_t acc_y;
+  int16_t acc_z;
+
+  float gy_roll, gy_yaw, gy_pitch; // Stores rotation rates in each axis (angular velocity)
+
+  // Read rotation rates from the gyroscope
+  Wire.beginTransmission(0x68);
+  Wire.write(0x43);
+  Wire.endTransmission();
+  Wire.requestFrom(0x68, 6);
+
+  gyro_x = Wire.read() << 8 | Wire.read();
+  gyro_y = Wire.read() << 8 | Wire.read();
+  gyro_z = Wire.read() << 8 | Wire.read();
+
+  gy_roll = (float) (gyro_x - gyro_x_bias) / 65.5;
+  gy_pitch = (float) (gyro_y - gyro_y_bias) / 65.5;
+  gy_yaw = (float) (gyro_z - gyro_z_bias) / 65.5;
+
+  // Serial.print("Roll: "); Serial.print(roll);
+  // Serial.print("    Yaw: "); Serial.print(yaw);
+  // Serial.print("    Pitch: "); Serial.println(pitch);
+
+  // Read data from the accelerometer
+  Wire.beginTransmission(0x68);
+  Wire.write(0x1C);
+  Wire.write(0x10);
+  Wire.endTransmission();
+  Wire.beginTransmission(0x68);
+  Wire.write(0x3B);
+  Wire.endTransmission();
+  Wire.requestFrom(0x68,6);
+
+  // Read bytes
+  acc_x = Wire.read() << 8 | Wire.read();
+  acc_y = Wire.read() << 8 | Wire.read();
+  acc_z = Wire.read() << 8 | Wire.read();
+
+  acc_roll = (float) acc_x / 4096 - acc_x_bias;
+  acc_pitch= (float) acc_y / 4096 - acc_y_bias;
+  acc_yaw = (float) acc_z / 4096 - acc_z_bias + 1; // Because when the drone is idle, it will have gravitational acceleration along the z axis
+
+  // Serial.print("acc_x: "); Serial.print(acc_roll);
+  // Serial.print("    acc_y: "); Serial.print(acc_pitch);
+  // Serial.print("    acc_z: ");Serial.println(acc_yaw);
+
+  // This calculates the angles by using the accelerometer
+  // TODO change roll and pitch variable names, this is because the HW-290 unit is not placed in the right direction on the breadboard
+  // Signs depend on the way the chip is mounted
+  float pitch_angle = -atan2(acc_pitch, sqrt(acc_roll * acc_roll + acc_yaw * acc_yaw)) * 180 / PI;
+  float roll_angle = -atan2(acc_roll, sqrt(acc_pitch * acc_pitch + acc_yaw * acc_yaw)) * 180 / PI;
+
+  Serial.print("Roll angle: "); Serial.print(roll_angle);
+  Serial.print("    Pitch angle: "); Serial.println(pitch_angle);
 }
