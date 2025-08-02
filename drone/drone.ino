@@ -1,5 +1,6 @@
 #include <Servo.h>
 #include <SoftwareSerial.h>
+#include <Wire.h>
 
 #define MAX_SPEED 1800
 #define MIN_SPEED 1000
@@ -11,6 +12,7 @@ struct Controller {
   float roll, yaw, pitch;
   int JLx, JLy, JRx, JRy;
   int PL, PR;
+  uint8_t checksum;
 };
 
 /**************************** Global Variables ****************************/
@@ -133,19 +135,26 @@ void setup() {
 
 void loop() {
 
+  // Save old data in case received data is corrupted
+  Controller old_data = data;
   // Wait for data from controller to set the motors' throttle
-  if (BT.available() >= sizeof(Controller)) {
-    Serial.println(millis() - last_received);
+  if (Serial.available() >= sizeof(Controller)) {
+    //Serial.println(millis() - last_received);
     // Read Bytes into the data Controller struct
-    BT.readBytes((char *) &data, sizeof(data));
+    Serial.readBytes((char *) &data, sizeof(data));
+
+    if (compute_checksum(data) == data.checksum) {
+      last_received = millis();
+    } else {
+      data = old_data; // Restore old data
+    }
     
-    last_received = millis();
   }
 
   // This function handles all movement and calculations
   calculate_update_throttle();
 
-  // If data_waiting_time in milliseconds went by without receiving data, and the throttle have already been changed by previously received data, land the drone.
+  // If 10s went by without receiving data, and the throttle have already been changed by previously received data, land the drone.
   if (millis() - last_received >= data_waiting_time && throttle >= MIN_SPEED && throttle <= MAX_SPEED) {
     descend();
   }
@@ -169,7 +178,7 @@ void calculate_update_throttle() {
   target_pitch = pitch_input;
 
   // Get angles measurments using the Kalman Filter
-  unsigned long current_time = macros();
+  unsigned long current_time = micros();
   float dt = (current_time - last_time_kf) / 1000000.0;
   last_time_kf = current_time;
 
@@ -391,4 +400,16 @@ void descend() {
 
   // Reset throttle
   throttle = MIN_SPEED;
+}
+
+
+// For validating data received from the controller
+uint8_t compute_checksum(const Controller &data) {
+  const uint8_t *ptr = (const uint8_t *) &data;
+  uint8_t sum = 0;
+
+  for (size_t i = 0; i < sizeof(Controller) - 1; ++i) 
+    sum ^= ptr[i];
+
+  return sum;
 }
