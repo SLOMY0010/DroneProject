@@ -32,6 +32,28 @@ float acc_z_bias = 0;
   float gy_roll, gy_yaw, gy_pitch; // Stores rotation rates in each axis (angular velocity)
   float acc_roll, acc_yaw, acc_pitch; // Stores acceleration in each axis
 
+// For PID control
+  // For roll
+  float target_roll = 0.0;
+  float prev_error_roll = 0.0;
+  float integral_roll = 0.0;
+
+  float Kp_roll = 1.5;
+  float Ki_roll = 0.05;
+  float Kd_roll = 0.2;
+
+  unsigned long last_time_pid_roll = micros();
+
+  // For pitch
+  float target_pitch = 0.0;
+  float prev_error_pitch = 0.0;
+  float integral_pitch = 0.0;
+
+  float Kp_pitch = 1.5;
+  float Ki_pitch = 0.05;
+  float Kd_pitch = 0.2;
+
+  unsigned long last_time_pid_pitch = micros();
 
 void setup() {
   Wire.setClock(400000); // For the MPU-6050
@@ -73,8 +95,13 @@ void loop() {
   angle_roll = kalman_filter(acc_roll, gy_roll, dt, angle_roll, bias_roll, P_roll);
   angle_pitch = kalman_filter(acc_pitch, gy_pitch, dt, angle_pitch, bias_pitch, P_pitch);
 
-  Serial.print("Kalman Roll: "); Serial.print(angle_roll);
-  Serial.print("    Kalman Pitch: "); Serial.println(angle_pitch);
+  float pid_output_pitch = pid_update(target_pitch, angle_pitch, (micros() - last_time_pid_pitch) / 1000000.0, Kp_pitch, Ki_pitch, Kd_pitch, prev_error_pitch, integral_pitch);
+  last_time_pid_pitch = micros();
+  float pid_output_roll = pid_update(target_roll, angle_roll, (micros() - last_time_pid_roll) / 1000000.0, Kp_roll, Ki_roll, Kd_roll, prev_error_roll, integral_roll);
+  last_time_pid_roll = micros();
+
+  Serial.print("PID Roll: "); Serial.print(pid_output_roll);
+  Serial.print("    PID Pitch: "); Serial.println(pid_output_pitch);
   
 }
 
@@ -230,6 +257,26 @@ float kalman_filter(float acc_angle, float gyro_rate, float dt, float &angle, fl
   P[1][1] -= K[1] * P01_temp;
 
   return angle;
+}
+
+
+float pid_update(float target, float measured_angle, float dt, float Kp, float Ki, float Kd, float &prev_error, float &integral) {
+  float error = target - measured_angle;
+
+  if (abs(error) < 0.5) integral = 0.0;
+
+  integral += error * dt;
+
+  float max_integral = 100;
+  if (integral > max_integral) integral = max_integral;
+  if (integral < -max_integral) integral = -max_integral;
+  
+  float derivative = (error - prev_error) / dt;
+
+  float output = Kp * error + Ki * integral + Kd * derivative;
+
+  prev_error = error;
+  return output;
 }
 
 
