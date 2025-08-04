@@ -73,6 +73,11 @@ SoftwareSerial BT(3, 2);  // Bluetooth module TX -> 3 RX -> 2
 unsigned long bt_last_sent = millis(); 
 unsigned long bt_sending_interval = 50; // How often to send data to drone.
 
+// For gyro flying mode
+unsigned long gymode_time = millis();
+bool switched_gymode = false;
+bool led_status = LOW;
+
 // To package controller data
 Controller data;
 
@@ -163,14 +168,43 @@ void loop() {
   
   // Get data from all input devices
   read_potens();
-  read_MPU();
   read_joysticks();
   read_buttons();
 
-  if (data.b) {
+  // If gyro flying mode is enabled, calculate roll and pitch angles
+  if (!data.a) {
+    if (switched_gymode == false) {
+      switched_gymode = true;
+      calibrate_gyro();
+      calibrate_acc();
+      gymode_time = millis();
+      led_status = LOW;
+    }
+
+    if (millis() - gymode_time >= 500) {
+      gymode_time = millis();
+      digitalWrite(led, !led_status);
+      led_status = !led_status;
+    }
+
+    float dt = (micros() - last_time_kf) / 1000000.0;
+    last_time_kf = micros();
+    
+    read_gyro();
+    read_acc();
+
     angle_roll = kalman_filter(acc_roll, gy_roll, dt, angle_roll, bias_roll, P_roll);
     angle_pitch = kalman_filter(acc_pitch, gy_pitch, dt, angle_pitch, bias_pitch, P_pitch);
 
+    data.roll = angle_roll;
+    data.pitch = angle_pitch;
+
+    Serial.print("Roll: "); Serial.print(data.roll);
+    Serial.print("    Pitch: "); Serial.println(data.pitch);
+  } else {
+    switched_gymode = false;
+    digitalWrite(led, LOW);
+    led_status = LOW;
   }
 
   // Only send if there is change, if no change after 3 seconds
@@ -264,9 +298,9 @@ void read_gyro() {
   gyro_z = Wire.read() << 8 | Wire.read();
 
   // Rates:
-  // TODO if the chip is placed properly on the PCB, swap gy_roll and gy_pitch
-  gy_pitch = (float) gyro_x / 65.5; // Notice that we're not subracting the bias, because the Kalman filter should handle it
-  gy_roll = (float) gyro_y / 65.5;
+  // TODO if the chip is placed properly on the PCB, gy_roll must be the first variable, gy_pitch must be the second one
+  gy_roll = (float) gyro_x / 65.5; // Notice that we're not subracting the bias, because the Kalman filter should handle it
+  gy_pitch = (float) gyro_y / 65.5;
   gy_yaw = (float) gyro_z / 65.5;
 
   // Serial.print("Roll: "); Serial.print(gy_roll);
@@ -302,10 +336,10 @@ void read_acc() {
   float acc_z_clean = (float) acc_z / 4096 - acc_z_bias + 1; // Because when the drone is idle, it will have gravitational acceleration along the z axis
 
   // This calculates the angles by using the accelerometer
-  // TODO change roll and pitch variable names, this is because the HW-290 unit is not placed in the right direction on the breadboard
+  // TODO change roll and pitch so that acc_roll is the first variable, then acc_pitch, this is because the HW-290 unit is not placed in the right direction on the breadboard.
   // Signs depend on the way the chip is mounted
-  acc_pitch = atan2(acc_y_clean, sqrt(acc_x_clean * acc_x_clean + acc_z_clean * acc_z_clean)) * 180 / PI;
-  acc_roll = -atan2(acc_x_clean, sqrt(acc_y_clean * acc_y_clean + acc_z_clean * acc_z_clean)) * 180 / PI;
+  acc_roll = -atan2(acc_y_clean, sqrt(acc_x_clean * acc_x_clean + acc_z_clean * acc_z_clean)) * 180 / PI;
+  acc_pitch = -atan2(acc_x_clean, sqrt(acc_y_clean * acc_y_clean + acc_z_clean * acc_z_clean)) * 180 / PI;
 
   // Serial.print("Roll angle: "); Serial.print(roll_angle);
   // Serial.print("    Pitch angle: "); Serial.println(pitch_angle);
@@ -315,8 +349,9 @@ void read_acc() {
 
 void calibrate_gyro() {
   long x_sum = 0, y_sum = 0, z_sum = 0;
+  int samples = 500;
 
-  for (int i = 0; i < 2000; i++) {
+  for (int i = 0; i < samples; i++) {
     // Read data
     Wire.beginTransmission(0x68);
     Wire.write(0x43);
@@ -331,9 +366,9 @@ void calibrate_gyro() {
     y_sum += gy;
     z_sum += gz;
   }
-  gyro_x_bias = (float) x_sum / 2000;
-  gyro_y_bias = (float) y_sum / 2000;
-  gyro_z_bias = (float) z_sum / 2000;
+  gyro_x_bias = (float) x_sum / samples;
+  gyro_y_bias = (float) y_sum / samples;
+  gyro_z_bias = (float) z_sum / samples;
 }
 
 
@@ -404,9 +439,9 @@ void read_joysticks() {
     new_input = true;
   }
 
-  Serial.print("Rx: " ); Serial.print(data.JRx); Serial.print("  Ry: "); Serial.print(data.JRy);
-  Serial.print("    Lx: " ); Serial.print(data.JLx); Serial.print("  Ly: "); Serial.print(data.JLy);
-  Serial.println();
+  // Serial.print("Rx: " ); Serial.print(data.JRx); Serial.print("  Ry: "); Serial.print(data.JRy);
+  // Serial.print("    Lx: " ); Serial.print(data.JLx); Serial.print("  Ly: "); Serial.print(data.JLy);
+  // Serial.println();
 }
 
 void read_buttons() {

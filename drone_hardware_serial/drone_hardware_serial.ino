@@ -183,6 +183,9 @@ void calculate_update_throttle() {
   float dt = (current_time - last_time_kf) / 1000000.0;
   last_time_kf = current_time;
 
+  read_gyro();
+  read_acc();
+
   angle_roll = kalman_filter(acc_roll, gy_roll, dt, angle_roll, bias_roll, P_roll);
   angle_pitch = kalman_filter(acc_pitch, gy_pitch, dt, angle_pitch, bias_pitch, P_pitch);
 
