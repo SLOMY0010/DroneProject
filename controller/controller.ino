@@ -199,6 +199,8 @@ void loop() {
     data.roll = angle_roll;
     data.pitch = angle_pitch;
 
+    new_input = true;
+
     Serial.print("Roll: "); Serial.print(data.roll);
     Serial.print("    Pitch: "); Serial.println(data.pitch);
   } else {
@@ -236,11 +238,6 @@ uint8_t compute_checksum(const Controller &data) {
     sum ^= ptr[i];
 
   return sum;
-}
-
-
-void gyro_flying_mode() {
-
 }
 
 

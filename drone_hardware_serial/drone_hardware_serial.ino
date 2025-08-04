@@ -84,6 +84,13 @@ Controller data;
 
 
 void setup() {
+
+  data.JLy = MIN_SPEED;
+  data.JLx = 0;
+  data.JRx = 0;
+  data.JRy = 0;
+  data.a = 1; // No gyro flight mode
+
   M1.attach(5); 
   M2.attach(3); 
   M3.attach(10);
@@ -133,21 +140,21 @@ void setup() {
 
 void loop() {
 
-  // Save old data in case received data is corrupted
-  Controller old_data = data;
-  // Wait for data from controller to set the motors' throttle
-  if (Serial.available() >= sizeof(Controller)) {
-    //Serial.println(millis() - last_received);
-    // Read Bytes into the data Controller struct
-    Serial.readBytes((char *) &data, sizeof(data));
+  // // Save old data in case received data is corrupted
+  // Controller old_data = data;
+  // // Wait for data from controller to set the motors' throttle
+  // if (Serial.available() >= sizeof(Controller)) {
+  //   //Serial.println(millis() - last_received);
+  //   // Read Bytes into the data Controller struct
+  //   Serial.readBytes((char *) &data, sizeof(data));
 
-    if (compute_checksum(data) == data.checksum) {
-      last_received = millis();
-    } else {
-      data = old_data; // Restore old data
-    }
+  //   if (compute_checksum(data) == data.checksum) {
+  //     last_received = millis();
+  //   } else {
+  //     data = old_data; // Restore old data
+  //   }
     
-  }
+  // }
 
   // This function handles all movement and calculations
   calculate_update_throttle();
@@ -194,6 +201,12 @@ void calculate_update_throttle() {
   last_time_pid_pitch = current_time;
   float pid_output_roll = pid_update(target_roll, angle_roll, (current_time - last_time_pid_roll) / 1000000.0, Kp_roll, Ki_roll, Kd_roll, prev_error_roll, integral_roll);
   last_time_pid_roll = current_time;
+
+  // Serial.print("Angle Roll: "); Serial.print(angle_roll);
+  // Serial.print("  Angle Pitch: "); Serial.print(angle_pitch);
+  // Serial.print("  PID Roll: "); Serial.print(pid_output_roll);
+  // Serial.print("  PID Pitch: "); Serial.println(pid_output_pitch);
+
 
   // Scale the pid output to proper motor signals:
   int roll = (int) (pid_output_roll * PID_SCALE_FACTOR);
