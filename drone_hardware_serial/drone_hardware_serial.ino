@@ -4,6 +4,9 @@
 
 #define MAX_SPEED 1800
 #define MIN_SPEED 1000
+#define MAX_ANGLE_INPUT 20
+#define MIN_ANGLE_INPUT -20
+
 #define PID_SCALE_FACTOR 2 // This is used to scale the PID output to proper motor signal
 
 // This struct is used to reconstruct the data sent by the controller
@@ -17,7 +20,7 @@ struct Controller {
 
 /************** Global Variables **************/
 int throttle = 0; 
-unsigned long data_waiting_time = 10000; // The drone will wait for 10s to receive from the controller, if it does not receive, it will land
+unsigned long data_waiting_time = 3000; // The drone will wait for 10s to receive from the controller, if it does not receive, it will land
 unsigned long last_received = millis();
 
 Servo M1, M2, M3, M4; // Motors configuration: M1 front-left, M2 front-right, M3 back-right, M4 back-left.
@@ -140,21 +143,21 @@ void setup() {
 
 void loop() {
 
-  // // Save old data in case received data is corrupted
-  // Controller old_data = data;
-  // // Wait for data from controller to set the motors' throttle
-  // if (Serial.available() >= sizeof(Controller)) {
-  //   //Serial.println(millis() - last_received);
-  //   // Read Bytes into the data Controller struct
-  //   Serial.readBytes((char *) &data, sizeof(data));
+  // Save old data in case received data is corrupted
+  Controller old_data = data;
+  // Wait for data from controller to set the motors' throttle
+  if (Serial.available() >= sizeof(Controller)) {
+    //Serial.println(millis() - last_received);
+    // Read Bytes into the data Controller struct
+    Serial.readBytes((char *) &data, sizeof(data));
 
-  //   if (compute_checksum(data) == data.checksum) {
-  //     last_received = millis();
-  //   } else {
-  //     data = old_data; // Restore old data
-  //   }
+    if (compute_checksum(data) == data.checksum) {
+      last_received = millis();
+    } else {
+      data = old_data; // Restore old data
+    }
     
-  // }
+  }
 
   // This function handles all movement and calculations
   calculate_update_throttle();
@@ -173,17 +176,24 @@ void loop() {
 
 
 
-/**************************** Functions ****************************/ 
-
+/**************************** Functions ****************************/
 void calculate_update_throttle() {
   int m1, m2, m3, m4;
 
-  int pitch_input = map(data.JRy, -200, 200, -30, 30), roll_input = map(data.JRx, -200, 200, -30, 30), yaw_input = data.JLx;
+  int pitch_input = map(data.JRy, -200, 200, MIN_ANGLE_INPUT, MAX_ANGLE_INPUT), roll_input = map(data.JRx, -200, 200, MIN_ANGLE_INPUT, MAX_ANGLE_INPUT), yaw_input = data.JLx;
   throttle = data.JLy; // A global variable
 
   // Pitch and Roll inputs are mapped to -30 to 30 degrees range
-  target_roll = roll_input;
-  target_pitch = pitch_input;
+  if (!data.a) {
+    target_roll = data.roll;
+    target_pitch = data.pitch;
+  } else {
+    target_roll = roll_input;
+    target_pitch = pitch_input;
+  }
+
+  Serial.print("Roll: "); Serial.print(target_roll);
+  Serial.print("  Pitch: "); Serial.println(target_pitch);
 
   // Get angles measurments using the Kalman Filter
   unsigned long current_time = micros();
@@ -207,7 +217,6 @@ void calculate_update_throttle() {
   // Serial.print("  PID Roll: "); Serial.print(pid_output_roll);
   // Serial.print("  PID Pitch: "); Serial.println(pid_output_pitch);
 
-
   // Scale the pid output to proper motor signals:
   int roll = (int) (pid_output_roll * PID_SCALE_FACTOR);
   int pitch = (int) (pid_output_pitch * PID_SCALE_FACTOR);
@@ -217,12 +226,12 @@ void calculate_update_throttle() {
   m3 = constrain(throttle - pitch - roll + yaw_input, MIN_SPEED, MAX_SPEED);   // Back-right
   m4 = constrain(throttle - pitch + roll - yaw_input, MIN_SPEED, MAX_SPEED);   // Back-left
 
-  // Update the speed of each motor
-  Serial.print("  m1: "); Serial.print(m1);
-  Serial.print("  m2: "); Serial.print(m2);
-  Serial.print("  m3: "); Serial.print(m3);
-  Serial.print("  m4: "); Serial.println(m4);
+  // Serial.print("  m1: "); Serial.print(m1);
+  // Serial.print("  m2: "); Serial.print(m2);
+  // Serial.print("  m3: "); Serial.print(m3);
+  // Serial.print("  m4: "); Serial.println(m4);
   
+  // Update the speed of each motor
   update_throttle(m1, m2, m3, m4);
 }
 
@@ -279,18 +288,6 @@ float kalman_filter(float acc_angle, float gyro_rate, float dt, float &angle, fl
   P[1][1] -= K[1] * P01_temp;
 
   return angle;
-}
-
-
-// For validating data received from the controller
-uint8_t compute_checksum(const Controller &data) {
-  const uint8_t *ptr = (const uint8_t *) &data;
-  uint8_t sum = 0;
-
-  for (size_t i = 0; i < sizeof(Controller) - 1; ++i) 
-    sum ^= ptr[i];
-
-  return sum;
 }
 
 
@@ -429,4 +426,27 @@ void descend() {
 
   // Reset throttle
   throttle = MIN_SPEED;
+}
+
+
+// For validating data received from the controller
+uint8_t compute_checksum(const Controller &data) {
+  const uint8_t *ptr = (const uint8_t *) &data;
+  uint8_t sum = 0;
+
+  for (size_t i = 0; i < sizeof(Controller) - 1; ++i) 
+    sum ^= ptr[i];
+
+  // In case some data violates limits but still seems valid in the checksum, set checksum to 0 to reject it
+  if (data.JLy < MIN_SPEED || data.JLy > MAX_SPEED ||
+      data.JLx < -200 || data.JLx > 200 ||
+      data.JRx < -200 || data.JRx > 200 ||
+      data.JRy < -200 || data.JRy > 200 ||
+      data.roll < MIN_ANGLE_INPUT || data.roll > MAX_ANGLE_INPUT ||
+      data.pitch < MIN_ANGLE_INPUT || data.pitch > MAX_ANGLE_INPUT) 
+    {
+      sum = 0;  
+    } 
+
+  return sum;
 }

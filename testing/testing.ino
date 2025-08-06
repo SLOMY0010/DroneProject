@@ -86,8 +86,9 @@ void setup() {
 }
 
 void loop() {
-  float dt = (micros() - last_time_kf) / 1000000.0;
-  last_time_kf = micros();
+  unsigned long current_time = micros();
+  float dt = (current_time - last_time_kf) / 1000000.0;
+  last_time_kf = current_time;
 
   read_gyro();
   read_acc();
@@ -95,10 +96,10 @@ void loop() {
   angle_roll = kalman_filter(acc_roll, gy_roll, dt, angle_roll, bias_roll, P_roll);
   angle_pitch = kalman_filter(acc_pitch, gy_pitch, dt, angle_pitch, bias_pitch, P_pitch);
 
-  float pid_output_pitch = pid_update(target_pitch, angle_pitch, (micros() - last_time_pid_pitch) / 1000000.0, Kp_pitch, Ki_pitch, Kd_pitch, prev_error_pitch, integral_pitch);
-  last_time_pid_pitch = micros();
-  float pid_output_roll = pid_update(target_roll, angle_roll, (micros() - last_time_pid_roll) / 1000000.0, Kp_roll, Ki_roll, Kd_roll, prev_error_roll, integral_roll);
-  last_time_pid_roll = micros();
+  float pid_output_pitch = pid_update(target_pitch, angle_pitch, (current_time - last_time_pid_pitch) / 1000000.0, Kp_pitch, Ki_pitch, Kd_pitch, prev_error_pitch, integral_pitch);
+  last_time_pid_pitch = current_time;
+  float pid_output_roll = pid_update(target_roll, angle_roll, (current_time - last_time_pid_roll) / 1000000.0, Kp_roll, Ki_roll, Kd_roll, prev_error_roll, integral_roll);
+  last_time_pid_roll = current_time;
 
   Serial.print("PID Roll: "); Serial.print(pid_output_roll);
   Serial.print("    PID Pitch: "); Serial.println(pid_output_pitch);

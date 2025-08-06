@@ -4,6 +4,8 @@
 
 #define MAX_SPEED 1800
 #define MIN_SPEED 1000
+#define MAX_ANGLE_INPUT 20
+#define MIN_ANGLE_INPUT -20
 #define PID_SCALE_FACTOR 2 // This is to scale the pid output to proper motor signal values
 
 // This struct is used to reconstruct the data sent by the controller
@@ -17,7 +19,7 @@ struct Controller {
 
 /**************************** Global Variables ****************************/
 int throttle = 0; 
-unsigned long data_waiting_time = 10000; // The drone will wait for 10s to receive from the controller, if it does not receive, it will land
+unsigned long data_waiting_time = 3000; // The drone will wait for 10s to receive from the controller, if it does not receive, it will land
 unsigned long last_received = millis(); // Tracks the last time data have been received via Bluetooth
 
 Servo M1, M2, M3, M4; // Motors configuration: M1 front-left, M2 front-right, M3 back-right, M4 back-left.
@@ -136,20 +138,20 @@ void setup() {
   calibrate_acc();
 
   BT.begin(9600);
-  Serial.begin(9600);
+  Serial.begin(115200);
 }
 
 
 void loop() {
-  Serial.println("Running...");
 
   // Save old data in case received data is corrupted
   Controller old_data = data;
   // Wait for data from controller to set the motors' throttle
-  if (Serial.available() >= sizeof(Controller)) {
+  if (BT.available() >= sizeof(Controller)) {
     //Serial.println(millis() - last_received);
     // Read Bytes into the data Controller struct
-    Serial.readBytes((char *) &data, sizeof(data));
+    BT.readBytes((char *) &data, sizeof(data));
+    // Serial.println("Received Bluetooth");
 
     if (compute_checksum(data) == data.checksum) {
       last_received = millis();
@@ -178,12 +180,20 @@ void loop() {
 void calculate_update_throttle() {
   int m1, m2, m3, m4;
 
-  int pitch_input = map(data.JRy, -200, 200, -30, 30), roll_input = map(data.JRx, -200, 200, -30, 30), yaw_input = data.JLx;
+  int pitch_input = map(data.JRy, -200, 200, MIN_ANGLE_INPUT, MAX_ANGLE_INPUT), roll_input = map(data.JRx, -200, 200, MIN_ANGLE_INPUT, MAX_ANGLE_INPUT), yaw_input = data.JLx;
   throttle = data.JLy; // A global variable
 
   // Pitch and Roll inputs are mapped to -30 to 30 degrees range
-  target_roll = roll_input;
-  target_pitch = pitch_input;
+  if (!data.a) {
+    target_roll = data.roll;
+    target_pitch = data.pitch;
+  } else {
+    target_roll = roll_input;
+    target_pitch = pitch_input;
+  }
+
+  Serial.print("Roll: "); Serial.print(target_roll);
+  Serial.print("  Pitch: "); Serial.println(target_pitch);
 
   // Get angles measurments using the Kalman Filter
   unsigned long current_time = micros();
@@ -426,6 +436,17 @@ uint8_t compute_checksum(const Controller &data) {
 
   for (size_t i = 0; i < sizeof(Controller) - 1; ++i) 
     sum ^= ptr[i];
+
+  // In case some data violates limits but still seems valid in the checksum, set checksum to 0 to reject it
+  if (data.JLy < MIN_SPEED || data.JLy > MAX_SPEED ||
+      data.JLx < -200 || data.JLx > 200 ||
+      data.JRx < -200 || data.JRx > 200 ||
+      data.JRy < -200 || data.JRy > 200 ||
+      data.roll < MIN_ANGLE_INPUT || data.roll > MAX_ANGLE_INPUT ||
+      data.pitch < MIN_ANGLE_INPUT || data.pitch > MAX_ANGLE_INPUT) 
+    {
+      sum = 0;  
+    } 
 
   return sum;
 }

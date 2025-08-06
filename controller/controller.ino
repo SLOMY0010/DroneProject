@@ -3,6 +3,8 @@
 
 #define MAX_SPEED 1800 // Signal value for maximum motor speed is 1800us
 #define MIN_SPEED 1000 // Signal value for minimum motor speed is 1000us
+#define MAX_ANGLE_INPUT 20
+#define MIN_ANGLE_INPUT -20
 
 #define led 9
 
@@ -193,9 +195,11 @@ void loop() {
     read_gyro();
     read_acc();
 
-    angle_roll = kalman_filter(acc_roll, gy_roll, dt, angle_roll, bias_roll, P_roll);
-    angle_pitch = kalman_filter(acc_pitch, gy_pitch, dt, angle_pitch, bias_pitch, P_pitch);
+    angle_roll = constrain(kalman_filter(acc_roll, gy_roll, dt, angle_roll, bias_roll, P_roll), MIN_ANGLE_INPUT, MAX_ANGLE_INPUT);
+    angle_pitch = constrain(kalman_filter(acc_pitch, gy_pitch, dt, angle_pitch, bias_pitch, P_pitch), MIN_ANGLE_INPUT, MAX_ANGLE_INPUT);
 
+    data.JRx = 0;
+    data.JRy = 0;
     data.roll = angle_roll;
     data.pitch = angle_pitch;
 
@@ -211,13 +215,14 @@ void loop() {
 
   // Only send if there is change, if no change after 3 seconds
   // send again to let the drone know that the connection is working
-  if (new_input || millis() - bt_last_sent >= 3000) {
+  if (new_input || millis() - bt_last_sent >= 500) {
   // Send data to drone via bluetooth in each time interval
     if (millis() - bt_last_sent >= bt_sending_interval) {
       // Send data to drone:
       data.checksum = compute_checksum(data);
       BT.write((char *) &data, sizeof(Controller));
       bt_last_sent = millis();
+      // Serial.println("Sent");
     }
     new_input = false;
   }
@@ -421,7 +426,7 @@ void read_joysticks() {
   int JLx_new = map(constrain(analogRead(A0) - JLx_offset, -512, 511), -512, 511, -200, 200);
   int JLy_new = map(analogRead(A1), 0, 1023, MIN_SPEED, MAX_SPEED); // Throttle input
 
-  int change_tolerance = 50; // if a value changes by this amount, update data and send to drone
+  int change_tolerance = 5; // if a value changes by this amount, update data and send to drone
 
   if (
     abs(JRx_new - data.JRx) >= change_tolerance ||
@@ -434,6 +439,9 @@ void read_joysticks() {
     data.JLx = JLx_new;
     data.JLy = JLy_new;
     new_input = true;
+
+    Serial.print("Rx: "); Serial.print(data.JRx);
+    Serial.print("  Ry: "); Serial.println(data.JRy);
   }
 
   // Serial.print("Rx: " ); Serial.print(data.JRx); Serial.print("  Ry: "); Serial.print(data.JRy);
