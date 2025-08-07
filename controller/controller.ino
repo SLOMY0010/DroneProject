@@ -3,8 +3,8 @@
 
 #define MAX_SPEED 1800 // Signal value for maximum motor speed is 1800us
 #define MIN_SPEED 1000 // Signal value for minimum motor speed is 1000us
-#define MAX_ANGLE_INPUT 20
-#define MIN_ANGLE_INPUT -20
+#define MAX_ANGLE_INPUT 30
+#define MIN_ANGLE_INPUT -30
 
 #define led 9
 
@@ -14,7 +14,7 @@
 #define a_pin 8
 #define b_pin 11
 
-// This struct is used to encapsulate all data into one type to send it via bluetooth
+// This struct is used to reconstruct the data sent by the controller
 struct Controller {
   bool x, y, a, b;
   float roll, yaw, pitch;
@@ -198,20 +198,28 @@ void loop() {
     angle_roll = constrain(kalman_filter(acc_roll, gy_roll, dt, angle_roll, bias_roll, P_roll), MIN_ANGLE_INPUT, MAX_ANGLE_INPUT);
     angle_pitch = constrain(kalman_filter(acc_pitch, gy_pitch, dt, angle_pitch, bias_pitch, P_pitch), MIN_ANGLE_INPUT, MAX_ANGLE_INPUT);
 
+    // Ignor joystick pitch and roll inputs
     data.JRx = 0;
     data.JRy = 0;
+
     data.roll = angle_roll;
     data.pitch = angle_pitch;
 
     new_input = true;
 
-    Serial.print("Roll: "); Serial.print(data.roll);
-    Serial.print("    Pitch: "); Serial.println(data.pitch);
+    // Serial.print("Roll: "); Serial.print(data.roll);
+    // Serial.print("    Pitch: "); Serial.println(data.pitch);
   } else {
     switched_gymode = false;
     digitalWrite(led, LOW);
     led_status = LOW;
+    data.roll = 0;
+    data.pitch = 0;
   }
+
+  // Serial.print("Rx: " ); Serial.print(data.JRx); Serial.print("  Ry: "); Serial.print(data.JRy);
+  // Serial.print("    Lx: " ); Serial.print(data.JLx); Serial.print("  Ly: "); Serial.println(data.JLy);
+
 
   // Only send if there is change, if no change after 3 seconds
   // send again to let the drone know that the connection is working
@@ -226,6 +234,13 @@ void loop() {
     }
     new_input = false;
   }
+  // Serial.print("Lx: "); Serial.print(data.JLx);
+  // Serial.print("    Ly: "); Serial.print(data.JLy);
+  // Serial.print("    Rx: "); Serial.print(data.JRx);
+  // Serial.print("    Ry: "); Serial.print(data.JRy);
+  // Serial.print("    p: "); Serial.print(data.pitch);
+  // Serial.print("    r: "); Serial.println(data.roll);
+  Serial.println(sizeof(Controller));
 }
 
 
@@ -440,8 +455,8 @@ void read_joysticks() {
     data.JLy = JLy_new;
     new_input = true;
 
-    Serial.print("Rx: "); Serial.print(data.JRx);
-    Serial.print("  Ry: "); Serial.println(data.JRy);
+    // Serial.print("Rx: "); Serial.print(data.JRx);
+    // Serial.print("  Ry: "); Serial.println(data.JRy);
   }
 
   // Serial.print("Rx: " ); Serial.print(data.JRx); Serial.print("  Ry: "); Serial.print(data.JRy);

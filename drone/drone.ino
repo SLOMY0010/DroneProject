@@ -4,9 +4,9 @@
 
 #define MAX_SPEED 1800
 #define MIN_SPEED 1000
-#define MAX_ANGLE_INPUT 20
-#define MIN_ANGLE_INPUT -20
-#define PID_SCALE_FACTOR 2 // This is to scale the pid output to proper motor signal values
+#define MAX_ANGLE_INPUT 30
+#define MIN_ANGLE_INPUT -30
+#define PID_SCALE_FACTOR 4 // This is to scale the pid output to proper motor signal values
 
 // This struct is used to reconstruct the data sent by the controller
 struct Controller {
@@ -21,6 +21,7 @@ struct Controller {
 int throttle = 0; 
 unsigned long data_waiting_time = 3000; // The drone will wait for 10s to receive from the controller, if it does not receive, it will land
 unsigned long last_received = millis(); // Tracks the last time data have been received via Bluetooth
+bool transmission_started = false;
 
 Servo M1, M2, M3, M4; // Motors configuration: M1 front-left, M2 front-right, M3 back-right, M4 back-left.
 SoftwareSerial BT(2, 7); // Bluetooth module TX -> 2 RX -> 7
@@ -143,36 +144,33 @@ void setup() {
 
 
 void loop() {
-
+  // Serial.println("Running");
   // Save old data in case received data is corrupted
+  // Serial.println(sizeof(Controller));
   Controller old_data = data;
-  // Wait for data from controller to set the motors' throttle
-  if (BT.available() >= sizeof(Controller)) {
-    //Serial.println(millis() - last_received);
-    // Read Bytes into the data Controller struct
-    BT.readBytes((char *) &data, sizeof(data));
-    // Serial.println("Received Bluetooth");
-
-    if (compute_checksum(data) == data.checksum) {
-      last_received = millis();
-    } else {
-      data = old_data; // Restore old data
-    }
     
+  if (BT.available() >= sizeof(Controller)) {
+    BT.readBytes(((char *) &data), sizeof(Controller)); // Read rest of data
+    last_received = millis();
+    if (compute_checksum(data) == data.checksum) {
+      transmission_started = true;
+    } else {
+      data = old_data;
+      Serial.println("Rejected");
+    }
   }
+    
 
-  // This function handles all movement and calculations
-  calculate_update_throttle();
+  if (transmission_started) {
+    // This function handles all movement and calculations
+    calculate_update_throttle();
+  }
 
   // If 10s went by without receiving data, and the throttle have already been changed by previously received data, land the drone.
-  if (millis() - last_received >= data_waiting_time && throttle >= MIN_SPEED && throttle <= MAX_SPEED) {
+  if (millis() - last_received >= data_waiting_time && transmission_started) {
+    transmission_started = false;
     descend();
   }
-
-  // Serial.print("Lx: "); Serial.print(data.JLx);
-  // Serial.print("    Ly: "); Serial.print(data.JLy);
-  // Serial.print("    Rx: "); Serial.print(data.JRx);
-  // Serial.print("    Ry: "); Serial.println(data.JRy);
 }
 
 
@@ -192,8 +190,8 @@ void calculate_update_throttle() {
     target_pitch = pitch_input;
   }
 
-  Serial.print("Roll: "); Serial.print(target_roll);
-  Serial.print("  Pitch: "); Serial.println(target_pitch);
+  // Serial.print("Roll: "); Serial.print(target_roll);
+  // Serial.print("  Pitch: "); Serial.println(target_pitch);
 
   // Get angles measurments using the Kalman Filter
   unsigned long current_time = micros();
@@ -221,15 +219,20 @@ void calculate_update_throttle() {
   int roll = (int) (pid_output_roll * PID_SCALE_FACTOR);
   int pitch = (int) (pid_output_pitch * PID_SCALE_FACTOR);
 
+  // Serial.print("t: "); Serial.print(throttle);
+  // Serial.print("  p: "); Serial.print(pitch);
+  // Serial.print("  r: "); Serial.print(roll);
+  // Serial.print("  y: "); Serial.println(yaw_input);
+
   m1 = constrain(throttle + pitch + roll + yaw_input, MIN_SPEED, MAX_SPEED);   // Front-left
   m2 = constrain(throttle + pitch - roll - yaw_input, MIN_SPEED, MAX_SPEED);   // Front-right
   m3 = constrain(throttle - pitch - roll + yaw_input, MIN_SPEED, MAX_SPEED);   // Back-right
   m4 = constrain(throttle - pitch + roll - yaw_input, MIN_SPEED, MAX_SPEED);   // Back-left
 
-  // Serial.print("  m1: "); Serial.print(m1);
-  // Serial.print("  m2: "); Serial.print(m2);
-  // Serial.print("  m3: "); Serial.print(m3);
-  // Serial.print("  m4: "); Serial.println(m4);
+  // Serial.print("1: "); Serial.print(m1);
+  // Serial.print("  2: "); Serial.print(m2);
+  // Serial.print("  3: "); Serial.print(m3);
+  // Serial.print("  4: "); Serial.println(m4);
   
   // Update the speed of each motor
   update_throttle(m1, m2, m3, m4);
@@ -425,6 +428,7 @@ void descend() {
   }
 
   // Reset throttle
+  data.JLy = MIN_SPEED;
   throttle = MIN_SPEED;
 }
 
@@ -445,7 +449,7 @@ uint8_t compute_checksum(const Controller &data) {
       data.roll < MIN_ANGLE_INPUT || data.roll > MAX_ANGLE_INPUT ||
       data.pitch < MIN_ANGLE_INPUT || data.pitch > MAX_ANGLE_INPUT) 
     {
-      sum = 0;  
+      return -1;  
     } 
 
   return sum;
