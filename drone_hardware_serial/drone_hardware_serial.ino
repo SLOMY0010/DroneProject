@@ -6,6 +6,9 @@
 #define MIN_SPEED 1000
 #define MAX_ANGLE_INPUT 30
 #define MIN_ANGLE_INPUT -30
+#define BATTERY_PIN A7
+#define BAT_R_LED 4
+#define BAT_G_LED 6
 
 #define PID_SCALE_FACTOR 3 // This is used to scale the PID output to proper motor signal
 
@@ -20,7 +23,7 @@ struct Controller {
 
 /************** Global Variables **************/
 int throttle = 0; 
-unsigned long data_waiting_time = 3000; // The drone will wait for 10s to receive from the controller, if it does not receive, it will land
+unsigned long data_waiting_time = 3000; // The drone will wait for this amoung of milliseconds to receive from the controller, if it does not receive, it will land
 unsigned long last_received = millis();
 bool transmission_started = false; 
 
@@ -88,6 +91,8 @@ Controller data;
 
 
 void setup() {
+  pinMode(BAT_G_LED, OUTPUT);
+  pinMode(BAT_R_LED, OUTPUT);
 
   data.JLy = MIN_SPEED;
   data.JLx = 0;
@@ -167,6 +172,8 @@ void loop() {
     transmission_started = false;
     descend();
   }
+
+  battery_status(); // Checks battery voltage and update led color accordingly.
 }
 
 
@@ -449,4 +456,26 @@ uint8_t compute_checksum(const Controller &data) {
     } 
 
   return sum;
+}
+
+
+float battery_status() {
+  int pin_reading = analogRead(BATTERY_PIN);
+  float pin_voltage = pin_reading * 5.0 / 1023.0;
+  float battery_voltage = pin_voltage * 2; // Because the voltage devider is a 1/2 divider
+  
+  if (battery_voltage <= 8.4 && battery_voltage > 7.4) {
+    // 0 -> fully on, 255 -> fully off
+    analogWrite(BAT_R_LED, 255);
+    analogWrite(BAT_G_LED, 0);
+  } else if (battery_voltage <= 7.4 && battery_voltage > 7.0) {
+    analogWrite(BAT_R_LED, 0);
+    analogWrite(BAT_G_LED, 0);
+  } else if (battery_voltage <= 7.0 && battery_voltage > 6.0) {
+    analogWrite(BAT_R_LED, 0);
+    analogWrite(BAT_G_LED, 175);
+  } else if (battery_voltage <= 6.0) {
+    analogWrite(BAT_R_LED, 0);
+    analogWrite(BAT_G_LED, 255);
+  }
 }
