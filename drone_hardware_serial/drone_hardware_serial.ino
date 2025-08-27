@@ -168,7 +168,7 @@ void loop() {
   }
 
   // If 10s went by without receiving data, and the throttle have already been changed by previously received data, land the drone.
-  if (millis() - last_received >= data_waiting_time && transmission_started) {
+  if ((millis() - last_received >= data_waiting_time && transmission_started) || !data.b) { // !data.b means button b was pressed
     transmission_started = false;
     descend();
   }
