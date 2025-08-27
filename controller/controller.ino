@@ -221,9 +221,9 @@ void loop() {
   // Serial.print("    Lx: " ); Serial.print(data.JLx); Serial.print("  Ly: "); Serial.println(data.JLy);
 
 
-  // Only send if there is change, if no change after 3 seconds
+  // Only send if there is change, if no change after sometime
   // send again to let the drone know that the connection is working
-  if (new_input || millis() - bt_last_sent >= 500) {
+  if (new_input || millis() - bt_last_sent >= 1000) {
   // Send data to drone via bluetooth in each time interval
     if (millis() - bt_last_sent >= bt_sending_interval) {
       // Send data to drone:
@@ -234,13 +234,25 @@ void loop() {
     }
     new_input = false;
   }
-  // Serial.print("Lx: "); Serial.print(data.JLx);
-  // Serial.print("    Ly: "); Serial.print(data.JLy);
-  // Serial.print("    Rx: "); Serial.print(data.JRx);
-  // Serial.print("    Ry: "); Serial.print(data.JRy);
+
+  // If button B is pressed, the drone will land, reset communication. The throttle must be pulled to its lowest.
+  if (!data.b) {
+    data.JLx = 0; data.JLy = 0; data.JRx = 0; data.JRy = 0;
+    digitalWrite(led, HIGH);
+
+    // The Throttle Joystick must be at lowest position in order to start the code
+    while (analogRead(A1) != 0) {
+      delay(3000);
+    }
+    digitalWrite(led, LOW);
+  }
+
+  Serial.print("Lx: "); Serial.print(data.JLx);
+  Serial.print("    Ly: "); Serial.print(data.JLy);
+  Serial.print("    Rx: "); Serial.print(data.JRx);
+  Serial.print("    Ry: "); Serial.println(data.JRy);
   // Serial.print("    p: "); Serial.print(data.pitch);
   // Serial.print("    r: "); Serial.println(data.roll);
-  Serial.println(sizeof(Controller));
 }
 
 
