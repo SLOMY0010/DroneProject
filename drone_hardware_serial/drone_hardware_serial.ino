@@ -1,6 +1,7 @@
 #include <Servo.h>
 #include <SoftwareSerial.h>
 #include <Wire.h>
+#include <QMC5883LCompass.h>
 
 #define MAX_SPEED 1800
 #define MIN_SPEED 1000
@@ -9,6 +10,12 @@
 #define BATTERY_PIN A7
 #define BAT_R_LED 4
 #define BAT_G_LED 6
+
+// MPU-6050 registers
+#define MPU6050_ADDR 0x68
+#define PWR_MGMT_1 0x6B
+#define USER_CTRL 0x6A
+#define INT_PIN_CFG 0x37
 
 #define PID_SCALE_FACTOR 3 // This is used to scale the PID output to proper motor signal
 
@@ -85,6 +92,11 @@ float acc_z_bias = 0;
 
   unsigned long last_time_pid_pitch = micros();
 
+// For the Magnetometer (compass)
+  QMC5883LCompass compass;
+  float heading;
+  float declination_angle = 6.1666;
+
 
 Controller data;
 /***********************************************/
@@ -140,8 +152,11 @@ void setup() {
   Wire.write(0x8); // Full scale range: 500 degs/s or LSB 65.5
   Wire.endTransmission();
 
+  enable_mpu_bypass(); // To allow connect the magnetometer to the main I2C bus
+
   calibrate_gyro();
   calibrate_acc();
+  compass.init();
 
   Serial.begin(9600);
 }
@@ -154,6 +169,9 @@ void loop() {
   if (Serial.available() >= sizeof(Controller)) {
     Serial.readBytes(((char *) &data), sizeof(Controller)); // Read rest of data
     last_received = millis();
+    analogWrite(BAT_R_LED, 0);
+    analogWrite(BAT_G_LED, 175);
+
     if (compute_checksum(data) == data.checksum) {
       transmission_started = true;
     } else {
@@ -166,6 +184,7 @@ void loop() {
     // This function handles all movement and calculations
     calculate_update_throttle();
   }
+  //calculate_update_throttle();
 
   // If 10s went by without receiving data, and the throttle have already been changed by previously received data, land the drone.
   if ((millis() - last_received >= data_waiting_time && transmission_started) || !data.b) { // !data.b means button b was pressed
@@ -178,6 +197,34 @@ void loop() {
 
 
 /**************************** Functions ****************************/
+
+void read_compass() {
+  compass.read();
+  int raw_mx = compass.getX();
+  int raw_my = compass.getY();
+  int raw_mz = compass.getZ();
+
+
+
+}
+
+void enable_mpu_bypass() {
+
+  // Disable I2C master (ensure aux bus can be bypassed)
+  Wire.beginTransmission(MPU6050_ADDR);
+  Wire.write(USER_CTRL);
+  Wire.write(0x00); // I2C_MST_EN=0
+  Wire.endTransmission();
+
+  // Enable BYPASS_EN so AUX_DA/AUX_CL connect to SDA/SCL
+  Wire.beginTransmission(MPU6050_ADDR);
+  Wire.write(INT_PIN_CFG);
+  Wire.write(0x02); // BYPASS_EN=1
+  Wire.endTransmission();
+  delay(10);
+
+}
+
 void calculate_update_throttle() {
   int m1, m2, m3, m4;
 
@@ -193,8 +240,6 @@ void calculate_update_throttle() {
     target_pitch = pitch_input;
   }
 
-  // Serial.print("Roll: "); Serial.print(target_roll);
-  // Serial.print("  Pitch: "); Serial.println(target_pitch);
 
   // Get angles measurments using the Kalman Filter
   unsigned long current_time = micros();
@@ -207,35 +252,53 @@ void calculate_update_throttle() {
   angle_roll = kalman_filter(acc_roll, gy_roll, dt, angle_roll, bias_roll, P_roll);
   angle_pitch = kalman_filter(acc_pitch, gy_pitch, dt, angle_pitch, bias_pitch, P_pitch);
 
+  // Read heading from compass
+  compass.read();
+  int mx = compass.getX(); int my = compass.getY(); int mz = compass.getZ();
+
+  // Calibration values: -1062,2191,-757,2407,-1631,1736
+  int mx_min = -1062, mx_max = 2191, my_min = -757, my_max = 2407, mz_min = -1631, mz_max = 1736;
+
+  // Compute offsets
+  float offset_x = (mx_max + mx_min) / 2.0, offset_y = (my_max + my_min) / 2.0, offset_z = (mz_max + mz_min) / 2.0;
+
+  // Compute scale factors
+  float range_x = (mx_max - mx_min) / 2.0, range_y = (my_max - my_min) / 2.0, range_z = (mz_max - mz_min) / 2.0;
+  float avg_range = (range_x + range_y + range_z) / 3.0;
+
+  // Scale and subtract offsets
+  float mx_cal = (mx - offset_x) * (avg_range / range_x);
+  float my_cal = (my - offset_y) * (avg_range / range_y);
+  float mz_cal = (mz - offset_z) * (avg_range / range_z);
+
+  float roll_rad = angle_roll * PI / 180.0; float pitch_rad = angle_pitch * PI / 180.0;
+
+  float mxh = mx_cal * cos(pitch_rad) + mz_cal * sin(pitch_rad);
+  float myh = mx_cal * sin(roll_rad) * sin(pitch_rad) + my_cal * cos(roll_rad) - mz_cal * sin(roll_rad) * cos(pitch_rad);
+
+  heading = atan2(myh, mxh) * 180.0 / PI + declination_angle;
+  if (heading < 0) heading += 360.0;
+
+  Serial.print("heading: "); Serial.println(heading);
+
+
   // Get PID output
   float pid_output_pitch = pid_update(target_pitch, angle_pitch, (current_time - last_time_pid_pitch) / 1000000.0, Kp_pitch, Ki_pitch, Kd_pitch, prev_error_pitch, integral_pitch);
   last_time_pid_pitch = current_time;
   float pid_output_roll = pid_update(target_roll, angle_roll, (current_time - last_time_pid_roll) / 1000000.0, Kp_roll, Ki_roll, Kd_roll, prev_error_roll, integral_roll);
   last_time_pid_roll = current_time;
 
-  // Serial.print("Angle Roll: "); Serial.print(angle_roll);
-  // Serial.print("  Angle Pitch: "); Serial.print(angle_pitch);
-  // Serial.print("  PID Roll: "); Serial.print(pid_output_roll);
-  // Serial.print("  PID Pitch: "); Serial.println(pid_output_pitch);
 
   // Scale the pid output to proper motor signals:
   int roll = (int) (pid_output_roll * PID_SCALE_FACTOR);
   int pitch = (int) (pid_output_pitch * PID_SCALE_FACTOR);
 
-  // Serial.print("t: "); Serial.print(throttle);
-  // Serial.print("  p: "); Serial.print(pitch);
-  // Serial.print("  r: "); Serial.print(roll);
-  // Serial.print("  y: "); Serial.println(yaw_input);
 
   m1 = constrain(throttle + pitch + roll + yaw_input, MIN_SPEED, MAX_SPEED);   // Front-left
   m2 = constrain(throttle + pitch - roll - yaw_input, MIN_SPEED, MAX_SPEED);   // Front-right
   m3 = constrain(throttle - pitch - roll + yaw_input, MIN_SPEED, MAX_SPEED);   // Back-right
   m4 = constrain(throttle - pitch + roll - yaw_input, MIN_SPEED, MAX_SPEED);   // Back-left
 
-  // Serial.print("1: "); Serial.print(m1);
-  // Serial.print("  2: "); Serial.print(m2);
-  // Serial.print("  3: "); Serial.print(m3);
-  // Serial.print("  4: "); Serial.println(m4);
   
   // Update the speed of each motor
   update_throttle(m1, m2, m3, m4);
