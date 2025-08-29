@@ -116,7 +116,7 @@ void setup() {
   data.JLx = 0;
   data.JRx = 0;
   data.JRy = 0;
-  data.a = 1; // No gyro flight mode
+  data.bools = 0; // No gyro flight mode
 
   M1.attach(5); 
   M2.attach(3); 
@@ -195,7 +195,7 @@ void loop() {
   //calculate_update_throttle();
 
   // If 10s went by without receiving data, and the throttle have already been changed by previously received data, land the drone.
-  if ((millis() - last_received >= data_waiting_time && transmission_started) || !data.b) { // !data.b means button b was pressed
+  if ((millis() - last_received >= data_waiting_time && transmission_started) || ((data.bools & BTN_B) ? 1 : 0)) { // !data.b means button b was pressed
     transmission_started = false;
     descend();
   }
@@ -230,7 +230,7 @@ void calculate_update_throttle() {
   throttle = data.JLy; // A global variable
 
   // Pitch and Roll inputs are mapped to -30 to 30 degrees range
-  if (!data.a) { // means we're in gyro mode
+  if ((data.bools & BTN_A) ? 1 : 0) { // means we're in gyro mode
     target_roll = data.roll / 100.0;
     target_pitch = data.pitch / 100.0;
   } else {
