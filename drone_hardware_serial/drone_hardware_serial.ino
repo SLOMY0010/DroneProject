@@ -11,6 +11,12 @@
 #define BAT_R_LED 4
 #define BAT_G_LED 6
 
+// Bools masks. To set use |, to read use &
+#define BTN_X 0x01 // 0000 0001
+#define BTN_Y 0x02 // 0000 0010
+#define BTN_A 0x04 // 0000 0100
+#define BTN_B 0x08 // 0000 1000
+
 // MPU-6050 registers
 #define MPU6050_ADDR 0x68
 #define PWR_MGMT_1 0x6B
@@ -21,10 +27,10 @@
 
 // This struct is used to reconstruct the data sent by the controller
 struct Controller {
-  bool x, y, a, b;
-  float roll, yaw, pitch;
-  int JLx, JLy, JRx, JRy;
-  int PL, PR;
+  uint8_t bools;
+  int16_t roll, pitch;
+  int16_t JLx, JLy, JRx, JRy;
+  int16_t PL, PR;
   uint8_t checksum;
 };
 
@@ -176,6 +182,8 @@ void loop() {
       transmission_started = true;
     } else {
       data = old_data;
+      analogWrite(BAT_R_LED, 0);
+      analogWrite(BAT_G_LED, 255); // LED will blink red if data was rejected
     }
   }
     
@@ -197,16 +205,6 @@ void loop() {
 
 
 /**************************** Functions ****************************/
-
-void read_compass() {
-  compass.read();
-  int raw_mx = compass.getX();
-  int raw_my = compass.getY();
-  int raw_mz = compass.getZ();
-
-
-
-}
 
 void enable_mpu_bypass() {
 
@@ -232,9 +230,9 @@ void calculate_update_throttle() {
   throttle = data.JLy; // A global variable
 
   // Pitch and Roll inputs are mapped to -30 to 30 degrees range
-  if (!data.a) {
-    target_roll = data.roll;
-    target_pitch = data.pitch;
+  if (!data.a) { // means we're in gyro mode
+    target_roll = data.roll / 100.0;
+    target_pitch = data.pitch / 100.0;
   } else {
     target_roll = roll_input;
     target_pitch = pitch_input;
@@ -278,9 +276,6 @@ void calculate_update_throttle() {
 
   heading = atan2(myh, mxh) * 180.0 / PI + declination_angle;
   if (heading < 0) heading += 360.0;
-
-  Serial.print("heading: "); Serial.println(heading);
-
 
   // Get PID output
   float pid_output_pitch = pid_update(target_pitch, angle_pitch, (current_time - last_time_pid_pitch) / 1000000.0, Kp_pitch, Ki_pitch, Kd_pitch, prev_error_pitch, integral_pitch);
@@ -512,8 +507,8 @@ uint8_t compute_checksum(const Controller &data) {
       data.JLx < -200 || data.JLx > 200 ||
       data.JRx < -200 || data.JRx > 200 ||
       data.JRy < -200 || data.JRy > 200 ||
-      data.roll < MIN_ANGLE_INPUT || data.roll > MAX_ANGLE_INPUT ||
-      data.pitch < MIN_ANGLE_INPUT || data.pitch > MAX_ANGLE_INPUT) 
+      data.roll < MIN_ANGLE_INPUT || data.roll / 100.0 > MAX_ANGLE_INPUT ||
+      data.pitch < MIN_ANGLE_INPUT || data.pitch / 100.0 > MAX_ANGLE_INPUT) 
     {
       return -1;  
     } 

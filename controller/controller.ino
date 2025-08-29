@@ -8,6 +8,12 @@
 
 #define led 9
 
+// Bools masks. To set use |, to read use &
+#define BTN_X 0x01 // 0000 0001
+#define BTN_Y 0x02 // 0000 0010
+#define BTN_A 0x04 // 0000 0100
+#define BTN_B 0x08 // 0000 1000
+
 // buttons pins
 #define x_pin 10
 #define y_pin 12
@@ -16,10 +22,10 @@
 
 // This struct is used to reconstruct the data sent by the controller
 struct Controller {
-  bool x, y, a, b;
-  float roll, yaw, pitch;
-  int JLx, JLy, JRx, JRy;
-  int PL, PR;
+  uint8_t bools;
+  int16_t roll, pitch;
+  int16_t JLx, JLy, JRx, JRy;
+  int16_t PL, PR;
   uint8_t checksum;
 };
 
@@ -174,7 +180,7 @@ void loop() {
   read_buttons();
 
   // If gyro flying mode is enabled, calculate roll and pitch angles
-  if (!data.a) {
+  if ((data.bools & BTN_A) ? 1 : 0) {
     if (switched_gymode == false) {
       switched_gymode = true;
       calibrate_gyro();
@@ -202,8 +208,8 @@ void loop() {
     data.JRx = 0;
     data.JRy = 0;
 
-    data.roll = angle_roll;
-    data.pitch = angle_pitch;
+    data.roll = (int16_t) (angle_roll * 100);
+    data.pitch = (int16_t) (angle_pitch * 100);
 
     new_input = true;
 
@@ -236,7 +242,7 @@ void loop() {
   }
 
   // If button B is pressed, the drone will land, reset communication. The throttle must be pulled to its lowest.
-  if (!data.b) {
+  if ((data.bools & BTN_B) ? 1 : 0) {
     data.JLx = 0; data.JLy = 0; data.JRx = 0; data.JRy = 0;
     digitalWrite(led, HIGH);
 
@@ -247,10 +253,10 @@ void loop() {
     digitalWrite(led, LOW);
   }
 
-  Serial.print("Lx: "); Serial.print(data.JLx);
-  Serial.print("    Ly: "); Serial.print(data.JLy);
-  Serial.print("    Rx: "); Serial.print(data.JRx);
-  Serial.print("    Ry: "); Serial.println(data.JRy);
+  // Serial.print("Lx: "); Serial.print(data.JLx);
+  // Serial.print("    Ly: "); Serial.print(data.JLy);
+  // Serial.print("    Rx: "); Serial.print(data.JRx);
+  // Serial.print("    Ry: "); Serial.println(data.JRy);
   // Serial.print("    p: "); Serial.print(data.pitch);
   // Serial.print("    r: "); Serial.println(data.roll);
 }
@@ -477,15 +483,17 @@ void read_joysticks() {
 }
 
 void read_buttons() {
-  data.x = debounce(x_pin, &lastXState, &lastTimeXChanged);
-  data.y = debounce(y_pin, &lastYState, &lastTimeYChanged);
-  data.a = debounce(a_pin, &lastAState, &lastTimeAChanged);
-  data.b = debounce(b_pin, &lastBState, &lastTimeBChanged);
+  data.bools = 0;
+  if (!debounce(x_pin, &lastXState, &lastTimeXChanged)) data.bools |= BTN_X;
+  if (!debounce(y_pin, &lastYState, &lastTimeYChanged)) data.bools |= BTN_Y;
+  if (!debounce(a_pin, &lastAState, &lastTimeAChanged)) data.bools |= BTN_A;
+  if (!debounce(b_pin, &lastBState, &lastTimeBChanged)) data.bools |= BTN_B;
 
-  // Serial.print("x: "); Serial.print(data.x);
-  // Serial.print("    y: "); Serial.print(data.y);
-  // Serial.print("    a: "); Serial.print(data.a);
-  // Serial.print("    b: "); Serial.println(data.b);
+  // Serial.print("x: "); Serial.print((data.bools & BTN_X) ? 1 : 0);
+  // Serial.print("    y: "); Serial.print((data.bools & BTN_Y) ? 1 : 0);
+  // Serial.print("    a: "); Serial.print((data.bools & BTN_A) ? 1 : 0);
+  // Serial.print("    b: "); Serial.print((data.bools & BTN_B) ? 1 : 0);
+  // Serial.print("    bools: "); Serial.println(data.bools);
 }
 
 bool debounce(int btn, bool *lastBtnState,unsigned long *lastTimeBtnChanged) {
