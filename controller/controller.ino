@@ -79,7 +79,7 @@ SoftwareSerial BT(3, 2);  // Bluetooth module TX -> 3 RX -> 2
 
 // For timing bluetooth transmission
 unsigned long bt_last_sent = millis(); 
-unsigned long bt_sending_interval = 100; // How often to send data to drone.
+unsigned long bt_sending_interval = 50; // How often to send data to drone. in millis
 
 // For gyro flying mode
 unsigned long gymode_time = millis();
@@ -173,6 +173,7 @@ void setup() {
 
 
 void loop() {
+  Serial.println(sizeof(Controller));
   
   // Get data from all input devices
   read_potens();
