@@ -188,12 +188,14 @@ void loop() {
       led_status = LOW;
     }
 
+    // Blinks the led
     if (millis() - gymode_time >= 500) {
       gymode_time = millis();
       digitalWrite(led, !led_status);
       led_status = !led_status;
     }
 
+    // For calculating pitch and roll angles
     float dt = (micros() - last_time_kf) / 1000000.0;
     last_time_kf = micros();
     
@@ -212,8 +214,9 @@ void loop() {
 
     new_input = true;
 
-    // Serial.print("Roll: "); Serial.print(data.roll);
-    // Serial.print("    Pitch: "); Serial.println(data.pitch);
+    Serial.print("JLy: "); Serial.print(data.JLy);
+    Serial.print("    Roll: "); Serial.print(data.roll / 100.0);
+    Serial.print("    Pitch: "); Serial.println(data.pitch / 100.0);
   } else {
     switched_gymode = false;
     digitalWrite(led, LOW);
@@ -236,6 +239,7 @@ void loop() {
       BT.write((char *) &data, sizeof(Controller));
       bt_last_sent = millis();
       new_input = false;
+      Serial.print("    Sent    ");
     }
   }
 
@@ -250,13 +254,6 @@ void loop() {
     }
     digitalWrite(led, LOW);
   }
-
-  // Serial.print("Lx: "); Serial.print(data.JLx);
-  // Serial.print("    Ly: "); Serial.print(data.JLy);
-  // Serial.print("    Rx: "); Serial.print(data.JRx);
-  // Serial.print("    Ry: "); Serial.println(data.JRy);
-  // Serial.print("    p: "); Serial.print(data.pitch);
-  // Serial.print("    r: "); Serial.println(data.roll);
 }
 
 

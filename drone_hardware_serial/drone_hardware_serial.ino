@@ -11,7 +11,7 @@
 #define BAT_R_LED 4
 #define BAT_G_LED 6
 
-// Bools masks. To set use |, to read use &
+// Bools masks. For all boolean inputs.
 #define BTN_X 0x01 // 0000 0001
 #define BTN_Y 0x02 // 0000 0010
 #define BTN_A 0x04 // 0000 0100
@@ -183,6 +183,8 @@ void setup() {
 
 void loop() {
 
+  battery_status(); // Checks battery voltage and update led color accordingly.
+
   // Save old data in case received data is corrupted
   Controller old_data = data;
   if (Serial.available() >= sizeof(Controller)) {
@@ -214,8 +216,6 @@ void loop() {
     transmission_started = false;
     descend();
   }
-
-  battery_status(); // Checks battery voltage and update led color accordingly.
 }
 
 
@@ -241,18 +241,18 @@ void enable_mpu_bypass() {
 void calculate_update_throttle() {
   int m1, m2, m3, m4;
 
+  // Pitch and Roll inputs are mapped to -30 to 30 degrees range
   int pitch_input = map(data.JRy, -200, 200, MIN_ANGLE_INPUT, MAX_ANGLE_INPUT), roll_input = map(data.JRx, -200, 200, MIN_ANGLE_INPUT, MAX_ANGLE_INPUT), yaw_input = data.JLx;
   throttle = data.JLy; // A global variable
 
-  // Pitch and Roll inputs are mapped to -30 to 30 degrees range
-  if ((data.bools & BTN_A) ? 1 : 0) { // means we're in gyro mode
+  // If A is pressed, gyro mode is enabled, roll and pitch joystick inputs are ignored.
+  if ((data.bools & BTN_A) ? 1 : 0) {
     target_roll = data.roll / 100.0;
     target_pitch = data.pitch / 100.0;
   } else {
     target_roll = roll_input;
     target_pitch = pitch_input;
   }
-
 
   // Get angles measurments using the Kalman Filter
   unsigned long current_time = micros();
@@ -275,7 +275,7 @@ void calculate_update_throttle() {
 
   // If X was pressed, drone must face north. Facing north will be interrupted if there is input on JLx
   if ((data.bools & BTN_X) ? 1 : 0) {
-    target_yaw = 0.0;
+    target_yaw = 0.0; // North
     got_target_yaw = true;
   }
 
