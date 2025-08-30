@@ -271,32 +271,13 @@ void calculate_update_throttle() {
   float pid_output_roll = pid_update(target_roll, angle_roll, (current_time - last_time_pid_roll) / 1000000.0, Kp_roll, Ki_roll, Kd_roll, prev_error_roll, integral_roll);
   last_time_pid_roll = current_time;
 
-  // Read heading from compass
-  compass.read();
-  int mx = compass.getX(); int my = compass.getY(); int mz = compass.getZ();
+  read_compass(); // Calculates and sets the heading variable
 
-  // Calibration values: -1062,2191,-757,2407,-1631,1736
-  int mx_min = -1062, mx_max = 2191, my_min = -757, my_max = 2407, mz_min = -1631, mz_max = 1736;
-
-  // Compute offsets
-  float offset_x = (mx_max + mx_min) / 2.0, offset_y = (my_max + my_min) / 2.0, offset_z = (mz_max + mz_min) / 2.0;
-
-  // Compute scale factors
-  float range_x = (mx_max - mx_min) / 2.0, range_y = (my_max - my_min) / 2.0, range_z = (mz_max - mz_min) / 2.0;
-  float avg_range = (range_x + range_y + range_z) / 3.0;
-
-  // Scale and subtract offsets
-  float mx_cal = (mx - offset_x) * (avg_range / range_x);
-  float my_cal = (my - offset_y) * (avg_range / range_y);
-  float mz_cal = (mz - offset_z) * (avg_range / range_z);
-
-  float roll_rad = -angle_roll * PI / 180.0; float pitch_rad = -angle_pitch * PI / 180.0;
-
-  float mxh = mx_cal * cos(pitch_rad) + mz_cal * sin(pitch_rad);
-  float myh = mx_cal * sin(roll_rad) * sin(pitch_rad) + my_cal * cos(roll_rad) - mz_cal * sin(roll_rad) * cos(pitch_rad);
-
-  heading = atan2(myh, mxh) * 180.0 / PI + declination_angle;
-  if (heading < 0) heading += 360.0;
+  // If X was pressed, drone must face north. Facing north will be interrupted if there is input on JLx
+  if ((data.bools & BTN_X) ? 1 : 0) {
+    target_yaw = 0.0;
+    got_target_yaw = true;
+  }
 
   // Since we are not controlling the angles of yaw directly, we will use PID only to keep the drone face the same direction, when there is no yaw input
   if (data.JLx == 0 && got_target_yaw == false) {
@@ -320,7 +301,6 @@ void calculate_update_throttle() {
 
     last_time_pid_yaw = current_time;
   }
-
 
   // Scale the pid output to proper motor signals:
   int roll = (int) (pid_output_roll * PID_SCALE_FACTOR);
@@ -466,6 +446,36 @@ void read_acc() {
   // Serial.print("Roll angle: "); Serial.print(roll_angle);
   // Serial.print("    Pitch angle: "); Serial.println(pitch_angle);
 
+}
+
+
+void read_compass() {
+  // Read heading from compass
+  compass.read();
+  int mx = compass.getX(); int my = compass.getY(); int mz = compass.getZ();
+
+  // Calibration values: -1062,2191,-757,2407,-1631,1736
+  int mx_min = -1062, mx_max = 2191, my_min = -757, my_max = 2407, mz_min = -1631, mz_max = 1736;
+
+  // Compute offsets
+  float offset_x = (mx_max + mx_min) / 2.0, offset_y = (my_max + my_min) / 2.0, offset_z = (mz_max + mz_min) / 2.0;
+
+  // Compute scale factors
+  float range_x = (mx_max - mx_min) / 2.0, range_y = (my_max - my_min) / 2.0, range_z = (mz_max - mz_min) / 2.0;
+  float avg_range = (range_x + range_y + range_z) / 3.0;
+
+  // Scale and subtract offsets
+  float mx_cal = (mx - offset_x) * (avg_range / range_x);
+  float my_cal = (my - offset_y) * (avg_range / range_y);
+  float mz_cal = (mz - offset_z) * (avg_range / range_z);
+
+  float roll_rad = -angle_roll * PI / 180.0; float pitch_rad = -angle_pitch * PI / 180.0;
+
+  float mxh = mx_cal * cos(pitch_rad) + mz_cal * sin(pitch_rad);
+  float myh = mx_cal * sin(roll_rad) * sin(pitch_rad) + my_cal * cos(roll_rad) - mz_cal * sin(roll_rad) * cos(pitch_rad);
+
+  heading = atan2(myh, mxh) * 180.0 / PI + declination_angle;
+  if (heading < 0) heading += 360.0;
 }
 
 
