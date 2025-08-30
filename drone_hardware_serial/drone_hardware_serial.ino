@@ -23,7 +23,7 @@
 #define USER_CTRL 0x6A
 #define INT_PIN_CFG 0x37
 
-#define PID_SCALE_FACTOR 3 // This is used to scale the PID output to proper motor signal
+#define PID_SCALE_FACTOR 2.5 // This is used to scale the PID output to proper motor signal
 
 // This struct is used to reconstruct the data sent by the controller
 struct Controller {
@@ -81,9 +81,9 @@ float acc_z_bias = 0;
   float prev_error_roll = 0.0;
   float integral_roll = 0.0;
 
-  float Kp_roll = 1.5;
+  float Kp_roll = 1.0;
   float Ki_roll = 0.05;
-  float Kd_roll = 0.2;
+  float Kd_roll = 0.02;
 
   unsigned long last_time_pid_roll = micros();
 
@@ -92,11 +92,24 @@ float acc_z_bias = 0;
   float prev_error_pitch = 0.0;
   float integral_pitch = 0.0;
 
-  float Kp_pitch = 1.5;
+  float Kp_pitch = 1.0;
   float Ki_pitch = 0.05;
-  float Kd_pitch = 0.2;
+  float Kd_pitch = 0.02;
 
   unsigned long last_time_pid_pitch = micros();
+
+  // For yaw
+  float target_yaw;
+  float prev_error_yaw = 0.0;
+  float integral_yaw = 0.0;
+
+  float Kp_yaw = 0.2;
+  float Ki_yaw = 0.01;
+  float Kd_yaw = 0;
+
+  bool got_target_yaw = false;
+
+  unsigned long last_time_pid_yaw = micros();
 
 // For the Magnetometer (compass)
   QMC5883LCompass compass;
@@ -192,7 +205,9 @@ void loop() {
     // This function handles all movement and calculations
     calculate_update_throttle();
   }
-  //calculate_update_throttle();
+  // calculate_update_throttle();
+  // Serial.print("roll: "); Serial.print(angle_roll);
+  // Serial.print("    pitch: "); Serial.println(angle_pitch);
 
   // If 10s went by without receiving data, and the throttle have already been changed by previously received data, land the drone.
   if ((millis() - last_received >= data_waiting_time && transmission_started) || ((data.bools & BTN_B) ? 1 : 0)) { // !data.b means button b was pressed
@@ -250,6 +265,12 @@ void calculate_update_throttle() {
   angle_roll = kalman_filter(acc_roll, gy_roll, dt, angle_roll, bias_roll, P_roll);
   angle_pitch = kalman_filter(acc_pitch, gy_pitch, dt, angle_pitch, bias_pitch, P_pitch);
 
+  // Get PID output
+  float pid_output_pitch = pid_update(target_pitch, angle_pitch, (current_time - last_time_pid_pitch) / 1000000.0, Kp_pitch, Ki_pitch, Kd_pitch, prev_error_pitch, integral_pitch);
+  last_time_pid_pitch = current_time;
+  float pid_output_roll = pid_update(target_roll, angle_roll, (current_time - last_time_pid_roll) / 1000000.0, Kp_roll, Ki_roll, Kd_roll, prev_error_roll, integral_roll);
+  last_time_pid_roll = current_time;
+
   // Read heading from compass
   compass.read();
   int mx = compass.getX(); int my = compass.getY(); int mz = compass.getZ();
@@ -269,7 +290,7 @@ void calculate_update_throttle() {
   float my_cal = (my - offset_y) * (avg_range / range_y);
   float mz_cal = (mz - offset_z) * (avg_range / range_z);
 
-  float roll_rad = angle_roll * PI / 180.0; float pitch_rad = angle_pitch * PI / 180.0;
+  float roll_rad = -angle_roll * PI / 180.0; float pitch_rad = -angle_pitch * PI / 180.0;
 
   float mxh = mx_cal * cos(pitch_rad) + mz_cal * sin(pitch_rad);
   float myh = mx_cal * sin(roll_rad) * sin(pitch_rad) + my_cal * cos(roll_rad) - mz_cal * sin(roll_rad) * cos(pitch_rad);
@@ -277,11 +298,28 @@ void calculate_update_throttle() {
   heading = atan2(myh, mxh) * 180.0 / PI + declination_angle;
   if (heading < 0) heading += 360.0;
 
-  // Get PID output
-  float pid_output_pitch = pid_update(target_pitch, angle_pitch, (current_time - last_time_pid_pitch) / 1000000.0, Kp_pitch, Ki_pitch, Kd_pitch, prev_error_pitch, integral_pitch);
-  last_time_pid_pitch = current_time;
-  float pid_output_roll = pid_update(target_roll, angle_roll, (current_time - last_time_pid_roll) / 1000000.0, Kp_roll, Ki_roll, Kd_roll, prev_error_roll, integral_roll);
-  last_time_pid_roll = current_time;
+  // Since we are not controlling the angles of yaw directly, we will use PID only to keep the drone face the same direction, when there is no yaw input
+  if (data.JLx == 0 && got_target_yaw == false) {
+    target_yaw = heading;
+    got_target_yaw = true;
+  } else if (data.JLx != 0) {
+    got_target_yaw = false;
+  }
+
+  if (got_target_yaw) {
+    float pid_output_yaw = pid_update(
+      (target_yaw > 180) ? target_yaw - 360 : target_yaw, 
+      (heading > 180) ? heading - 360 : heading, 
+      (current_time - last_time_pid_yaw) / 1000000.0, 
+      Kp_yaw, Ki_yaw, Kd_yaw, 
+      prev_error_yaw, 
+      integral_yaw
+    );
+
+    yaw_input = (int) (constrain(pid_output_yaw, -30, 30) * PID_SCALE_FACTOR * 2);
+
+    last_time_pid_yaw = current_time;
+  }
 
 
   // Scale the pid output to proper motor signals:

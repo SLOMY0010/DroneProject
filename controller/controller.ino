@@ -8,7 +8,7 @@
 
 #define led 9
 
-// Bools masks. To set use |, to read use &
+// Bools masks.
 #define BTN_X 0x01 // 0000 0001
 #define BTN_Y 0x02 // 0000 0010
 #define BTN_A 0x04 // 0000 0100
@@ -20,7 +20,7 @@
 #define a_pin 8
 #define b_pin 11
 
-// This struct is used to reconstruct the data sent by the controller
+// This struct collects the controller data to send it to the drone
 struct Controller {
   uint8_t bools;
   int16_t roll, pitch;
@@ -148,7 +148,6 @@ void setup() {
 
   // Calibration processes
   delay(500);
-  calibrate_gyro();
   calculate_joysticks_offset();
   
   /*
@@ -173,7 +172,6 @@ void setup() {
 
 
 void loop() {
-  Serial.println(sizeof(Controller));
   
   // Get data from all input devices
   read_potens();
@@ -237,9 +235,8 @@ void loop() {
       data.checksum = compute_checksum(data);
       BT.write((char *) &data, sizeof(Controller));
       bt_last_sent = millis();
-      // Serial.println("Sent");
+      new_input = false;
     }
-    new_input = false;
   }
 
   // If button B is pressed, the drone will land, reset communication. The throttle must be pulled to its lowest.
