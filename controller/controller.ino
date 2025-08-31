@@ -509,8 +509,8 @@ bool debounce(int btn, bool *lastBtnState,unsigned long *lastTimeBtnChanged) {
 
 // This function reads the input from the two potentiometers.
 void read_potens() {
-  data.PL = analogRead(A6);
-  data.PR = analogRead(A7);
-  // Serial.print("PL: "); Serial.print(data.PL);
-  // Serial.print("    PR: "); Serial.println(data.PR);
+  data.PL = map(analogRead(A6), 0, 1023, MIN_SPEED, MAX_SPEED);
+  data.PR = map(analogRead(A7), 0, 1023, MIN_SPEED, MAX_SPEED);
+  Serial.print("PL: "); Serial.print(data.PL);
+  Serial.print("    PR: "); Serial.println(data.PR);
 }

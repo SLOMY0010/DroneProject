@@ -12,10 +12,14 @@
 #define BAT_G_LED 6
 
 // Bools masks. For all boolean inputs.
-#define BTN_X 0x01 // 0000 0001
-#define BTN_Y 0x02 // 0000 0010
-#define BTN_A 0x04 // 0000 0100
-#define BTN_B 0x08 // 0000 1000
+#define BTN_X 0x01  // 0000 0001
+#define BTN_Y 0x02  // 0000 0010
+#define BTN_A 0x04  // 0000 0100
+#define BTN_B 0x08  // 0000 1000
+#define JBTN_L 0x10 // 0001 0000
+#define JBTN_R 0x20 // 0010 0000
+#define SW_L 0x40   // 0100 0000
+#define SW_R 0x80   // 1000 0000
 
 // MPU-6050 registers
 #define MPU6050_ADDR 0x68
@@ -116,6 +120,11 @@ float acc_z_bias = 0;
   float heading;
   float declination_angle = 6.1666;
 
+// For X mode
+  bool xmode_on = false;
+  bool PL_engaged = false;
+  bool PR_engaged = false;
+  int old_throttle;
 
 Controller data;
 /***********************************************/
@@ -247,16 +256,38 @@ void calculate_update_throttle() {
 
   // Pitch and Roll inputs are mapped to -30 to 30 degrees range
   int pitch_input = map(data.JRy, -200, 200, MIN_ANGLE_INPUT, MAX_ANGLE_INPUT), roll_input = map(data.JRx, -200, 200, MIN_ANGLE_INPUT, MAX_ANGLE_INPUT), yaw_input = data.JLx;
-  throttle = data.JLy; // A global variable
-  
-  // If A is pressed, gyro mode is enabled, roll and pitch joystick inputs are ignored.
-  if ((data.bools & BTN_A) ? 1 : 0) {
-    target_roll = data.roll / 100.0;
-    target_pitch = data.pitch / 100.0;
-  } else {
-    target_roll = roll_input;
-    target_pitch = pitch_input;
+  throttle = data.JLy;
+
+  // If SW_L is on, it means X mode is on
+  // If X mode was just enabled, save old throttle in order to keep the drone stable
+  if (!xmode_on && (data.bools & BTN_Y) ? 1 : 0) {
+    old_throttle = throttle;
+    xmode_on = true;
   }
+
+  // If X mode is enabled check if PR is close enough to current throttle. If it is close it is ok to engage it.
+  if ((data.bools & BTN_Y) ? 1 : 0) {
+    if (abs(data.PR - old_throttle) <= 50) {
+      PL_engaged = true;
+    }
+    if (PL_engaged) throttle = data.PR;
+    else throttle = old_throttle;
+    
+  } else if (xmode_on && !((data.bools & BTN_Y) ? 1 : 0)) { // If X mode was just disabled, disengage PL
+    if (abs(data.PR - data.JLy) <= 50) {
+      throttle = data.JLy;
+      PL_engaged = false;
+      PR_engaged = false;
+      xmode_on = false;
+    } else {
+      throttle = data.PR;
+    }
+  }
+
+
+  // If A is pressed, gyro mode is enabled, roll and pitch joystick inputs are ignored.
+  target_roll = (data.bools & BTN_A) ? data.roll / 100.0 : roll_input;
+  target_pitch = (data.bools & BTN_A) ? data.pitch / 100.0 : pitch_input;
 
   // Get angles measurments using the Kalman Filter
   unsigned long current_time = micros();
