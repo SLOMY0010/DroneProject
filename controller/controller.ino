@@ -214,9 +214,9 @@ void loop() {
 
     new_input = true;
 
-    Serial.print("JLy: "); Serial.print(data.JLy);
-    Serial.print("    Roll: "); Serial.print(data.roll / 100.0);
-    Serial.print("    Pitch: "); Serial.println(data.pitch / 100.0);
+    // Serial.print("JLy: "); Serial.print(data.JLy);
+    // Serial.print("    Roll: "); Serial.print(data.roll / 100.0);
+    // Serial.print("    Pitch: "); Serial.println(data.pitch / 100.0);
   } else {
     switched_gymode = false;
     digitalWrite(led, LOW);
@@ -239,7 +239,7 @@ void loop() {
       BT.write((char *) &data, sizeof(Controller));
       bt_last_sent = millis();
       new_input = false;
-      Serial.print("    Sent    ");
+      Serial.println("Sent");
     }
   }
 
@@ -457,6 +457,7 @@ void read_joysticks() {
   int change_tolerance = 5; // if a value changes by this amount, update data and send to drone
 
   if (
+    ((data.bools & BTN_A) ? 1 : 0) ||
     abs(JRx_new - data.JRx) >= change_tolerance ||
     abs(JRy_new - data.JRy) >= change_tolerance ||
     abs(JLx_new - data.JLx) >= change_tolerance ||

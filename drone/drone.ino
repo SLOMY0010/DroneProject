@@ -1,27 +1,44 @@
 #include <Servo.h>
 #include <SoftwareSerial.h>
 #include <Wire.h>
+#include <QMC5883LCompass.h>
 
 #define MAX_SPEED 1800
 #define MIN_SPEED 1000
 #define MAX_ANGLE_INPUT 30
 #define MIN_ANGLE_INPUT -30
-#define PID_SCALE_FACTOR 4 // This is to scale the pid output to proper motor signal values
+#define BATTERY_PIN A7
+#define BAT_R_LED 4
+#define BAT_G_LED 6
+
+// Bools masks. For all boolean inputs.
+#define BTN_X 0x01 // 0000 0001
+#define BTN_Y 0x02 // 0000 0010
+#define BTN_A 0x04 // 0000 0100
+#define BTN_B 0x08 // 0000 1000
+
+// MPU-6050 registers
+#define MPU6050_ADDR 0x68
+#define PWR_MGMT_1 0x6B
+#define USER_CTRL 0x6A
+#define INT_PIN_CFG 0x37
+
+#define PID_SCALE_FACTOR 2.5 // This is used to scale the PID output to proper motor signal
 
 // This struct is used to reconstruct the data sent by the controller
 struct Controller {
-  bool x, y, a, b;
-  float roll, yaw, pitch;
-  int JLx, JLy, JRx, JRy;
-  int PL, PR;
+  uint8_t bools;
+  int16_t roll, pitch;
+  int16_t JLx, JLy, JRx, JRy;
+  int16_t PL, PR;
   uint8_t checksum;
 };
 
-/**************************** Global Variables ****************************/
+/************** Global Variables **************/
 int throttle = 0; 
-unsigned long data_waiting_time = 3000; // The drone will wait for 10s to receive from the controller, if it does not receive, it will land
-unsigned long last_received = millis(); // Tracks the last time data have been received via Bluetooth
-bool transmission_started = false;
+unsigned long data_waiting_time = 3000; // The drone will wait for this amoung of milliseconds to receive from the controller, if it does not receive, it will land
+unsigned long last_received = millis();
+bool transmission_started = false; 
 
 Servo M1, M2, M3, M4; // Motors configuration: M1 front-left, M2 front-right, M3 back-right, M4 back-left.
 SoftwareSerial BT(2, 7); // Bluetooth module TX -> 2 RX -> 7
@@ -64,9 +81,9 @@ float acc_z_bias = 0;
   float prev_error_roll = 0.0;
   float integral_roll = 0.0;
 
-  float Kp_roll = 1.5;
+  float Kp_roll = 1.0;
   float Ki_roll = 0.05;
-  float Kd_roll = 0.2;
+  float Kd_roll = 0.02;
 
   unsigned long last_time_pid_roll = micros();
 
@@ -75,25 +92,44 @@ float acc_z_bias = 0;
   float prev_error_pitch = 0.0;
   float integral_pitch = 0.0;
 
-  float Kp_pitch = 1.5;
+  float Kp_pitch = 1.0;
   float Ki_pitch = 0.05;
-  float Kd_pitch = 0.2;
+  float Kd_pitch = 0.02;
 
   unsigned long last_time_pid_pitch = micros();
 
+  // For yaw
+  float target_yaw;
+  float prev_error_yaw = 0.0;
+  float integral_yaw = 0.0;
+
+  float Kp_yaw = 0.2;
+  float Ki_yaw = 0.01;
+  float Kd_yaw = 0;
+
+  bool got_target_yaw = false;
+
+  unsigned long last_time_pid_yaw = micros();
+
+// For the Magnetometer (compass)
+  QMC5883LCompass compass;
+  float heading;
+  float declination_angle = 6.1666;
+
+
 Controller data;
-
-
-/****************************************************************************/
+/***********************************************/
 
 
 void setup() {
+  pinMode(BAT_G_LED, OUTPUT);
+  pinMode(BAT_R_LED, OUTPUT);
 
   data.JLy = MIN_SPEED;
   data.JLx = 0;
   data.JRx = 0;
   data.JRy = 0;
-  data.a = 1; // No gyro flight mode
+  data.bools = 0; // No gyro flight mode
 
   M1.attach(5); 
   M2.attach(3); 
@@ -135,39 +171,59 @@ void setup() {
   Wire.write(0x8); // Full scale range: 500 degs/s or LSB 65.5
   Wire.endTransmission();
 
+  enable_mpu_bypass(); // To allow connect the magnetometer to the main I2C bus
+
   calibrate_gyro();
   calibrate_acc();
+  compass.init();
 
+  Serial.begin(9600);
   BT.begin(9600);
-  Serial.begin(115200);
 }
 
 
 void loop() {
-  // Serial.println("Running");
+
+  battery_status(); // Checks battery voltage and update led color accordingly.
+
   // Save old data in case received data is corrupted
-  // Serial.println(sizeof(Controller));
   Controller old_data = data;
-    
   if (BT.available() >= sizeof(Controller)) {
     BT.readBytes(((char *) &data), sizeof(Controller)); // Read rest of data
     last_received = millis();
+    analogWrite(BAT_R_LED, 0);
+    analogWrite(BAT_G_LED, 175);
+
     if (compute_checksum(data) == data.checksum) {
       transmission_started = true;
+      Serial.print("y:"); Serial.print(data.JLy);
+      Serial.print(" x:"); Serial.print(data.JLx);
+      Serial.print(" r:"); Serial.print(data.roll);
+      Serial.print(" p:"); Serial.println(data.pitch);
+
     } else {
       data = old_data;
-      Serial.println("Rejected");
+      analogWrite(BAT_R_LED, 255);
+      analogWrite(BAT_G_LED, 255); // LED will blink red if data was rejected
     }
   }
     
+  if (data.JLy == 0) {
+    analogWrite(BAT_R_LED, 0);
+    analogWrite(BAT_G_LED, 255);
+  }
+
 
   if (transmission_started) {
     // This function handles all movement and calculations
     calculate_update_throttle();
   }
+  // calculate_update_throttle();
+  // Serial.print("roll: "); Serial.print(angle_roll);
+  // Serial.print("    pitch: "); Serial.println(angle_pitch);
 
   // If 10s went by without receiving data, and the throttle have already been changed by previously received data, land the drone.
-  if (millis() - last_received >= data_waiting_time && transmission_started) {
+  if ((millis() - last_received >= data_waiting_time && transmission_started) || ((data.bools & BTN_B) ? 1 : 0)) { // Pressing B lands the drone
     transmission_started = false;
     descend();
   }
@@ -175,23 +231,39 @@ void loop() {
 
 
 /**************************** Functions ****************************/
+
+void enable_mpu_bypass() {
+
+  // Disable I2C master (ensure aux bus can be bypassed)
+  Wire.beginTransmission(MPU6050_ADDR);
+  Wire.write(USER_CTRL);
+  Wire.write(0x00); // I2C_MST_EN=0
+  Wire.endTransmission();
+
+  // Enable BYPASS_EN so AUX_DA/AUX_CL connect to SDA/SCL
+  Wire.beginTransmission(MPU6050_ADDR);
+  Wire.write(INT_PIN_CFG);
+  Wire.write(0x02); // BYPASS_EN=1
+  Wire.endTransmission();
+  delay(10);
+
+}
+
 void calculate_update_throttle() {
   int m1, m2, m3, m4;
 
+  // Pitch and Roll inputs are mapped to -30 to 30 degrees range
   int pitch_input = map(data.JRy, -200, 200, MIN_ANGLE_INPUT, MAX_ANGLE_INPUT), roll_input = map(data.JRx, -200, 200, MIN_ANGLE_INPUT, MAX_ANGLE_INPUT), yaw_input = data.JLx;
   throttle = data.JLy; // A global variable
-
-  // Pitch and Roll inputs are mapped to -30 to 30 degrees range
-  if (!data.a) {
-    target_roll = data.roll;
-    target_pitch = data.pitch;
+  
+  // If A is pressed, gyro mode is enabled, roll and pitch joystick inputs are ignored.
+  if ((data.bools & BTN_A) ? 1 : 0) {
+    target_roll = data.roll / 100.0;
+    target_pitch = data.pitch / 100.0;
   } else {
     target_roll = roll_input;
     target_pitch = pitch_input;
   }
-
-  // Serial.print("Roll: "); Serial.print(target_roll);
-  // Serial.print("  Pitch: "); Serial.println(target_pitch);
 
   // Get angles measurments using the Kalman Filter
   unsigned long current_time = micros();
@@ -210,30 +282,53 @@ void calculate_update_throttle() {
   float pid_output_roll = pid_update(target_roll, angle_roll, (current_time - last_time_pid_roll) / 1000000.0, Kp_roll, Ki_roll, Kd_roll, prev_error_roll, integral_roll);
   last_time_pid_roll = current_time;
 
-  // Serial.print("Angle Roll: "); Serial.print(angle_roll);
-  // Serial.print("  Angle Pitch: "); Serial.print(angle_pitch);
-  // Serial.print("  PID Roll: "); Serial.print(pid_output_roll);
-  // Serial.print("  PID Pitch: "); Serial.println(pid_output_pitch);
+  read_compass(); // Calculates and sets the heading variable
+
+  // If X was pressed, drone must face north. Facing north will be interrupted if there is input on JLx
+  if ((data.bools & BTN_X) ? 1 : 0) {
+    target_yaw = 0.0; // North
+    got_target_yaw = true;
+  }
+
+  // Since we are not controlling the angles of yaw directly, we will use PID only to keep the drone face the same direction, when there is no yaw input
+  if (data.JLx == 0 && got_target_yaw == false) {
+    target_yaw = heading;
+    got_target_yaw = true;
+  } else if (data.JLx != 0) {
+    got_target_yaw = false;
+  }
+
+  if (got_target_yaw) {
+    float pid_output_yaw = pid_update(
+      (target_yaw > 180) ? target_yaw - 360 : target_yaw, 
+      (heading > 180) ? heading - 360 : heading, 
+      (current_time - last_time_pid_yaw) / 1000000.0, 
+      Kp_yaw, Ki_yaw, Kd_yaw, 
+      prev_error_yaw, 
+      integral_yaw
+    );
+
+    yaw_input = (int) (constrain(pid_output_yaw, -30, 30) * PID_SCALE_FACTOR * 2);
+
+    last_time_pid_yaw = current_time;
+  }
 
   // Scale the pid output to proper motor signals:
   int roll = (int) (pid_output_roll * PID_SCALE_FACTOR);
   int pitch = (int) (pid_output_pitch * PID_SCALE_FACTOR);
 
-  // Serial.print("t: "); Serial.print(throttle);
-  // Serial.print("  p: "); Serial.print(pitch);
-  // Serial.print("  r: "); Serial.print(roll);
-  // Serial.print("  y: "); Serial.println(yaw_input);
+  // Serial.print("roll: "); Serial.print(roll); Serial.print("    pitch: "); Serial.print(pitch);
+  // Serial.print("    yaw: "); Serial.println(yaw_input);
+
 
   m1 = constrain(throttle + pitch + roll + yaw_input, MIN_SPEED, MAX_SPEED);   // Front-left
   m2 = constrain(throttle + pitch - roll - yaw_input, MIN_SPEED, MAX_SPEED);   // Front-right
   m3 = constrain(throttle - pitch - roll + yaw_input, MIN_SPEED, MAX_SPEED);   // Back-right
   m4 = constrain(throttle - pitch + roll - yaw_input, MIN_SPEED, MAX_SPEED);   // Back-left
 
-  // Serial.print("1: "); Serial.print(m1);
-  // Serial.print("  2: "); Serial.print(m2);
-  // Serial.print("  3: "); Serial.print(m3);
-  // Serial.print("  4: "); Serial.println(m4);
-  
+  // Serial.print("m1: "); Serial.print(m1); Serial.print("    m2: "); Serial.print(m2);
+  // Serial.print("    m3: "); Serial.print(m3); Serial.print("    m4: "); Serial.println(m4);
+
   // Update the speed of each motor
   update_throttle(m1, m2, m3, m4);
 }
@@ -370,6 +465,36 @@ void read_acc() {
 }
 
 
+void read_compass() {
+  // Read heading from compass
+  compass.read();
+  int mx = compass.getX(); int my = compass.getY(); int mz = compass.getZ();
+
+  // Calibration values: -1062,2191,-757,2407,-1631,1736
+  int mx_min = -1062, mx_max = 2191, my_min = -757, my_max = 2407, mz_min = -1631, mz_max = 1736;
+
+  // Compute offsets
+  float offset_x = (mx_max + mx_min) / 2.0, offset_y = (my_max + my_min) / 2.0, offset_z = (mz_max + mz_min) / 2.0;
+
+  // Compute scale factors
+  float range_x = (mx_max - mx_min) / 2.0, range_y = (my_max - my_min) / 2.0, range_z = (mz_max - mz_min) / 2.0;
+  float avg_range = (range_x + range_y + range_z) / 3.0;
+
+  // Scale and subtract offsets
+  float mx_cal = (mx - offset_x) * (avg_range / range_x);
+  float my_cal = (my - offset_y) * (avg_range / range_y);
+  float mz_cal = (mz - offset_z) * (avg_range / range_z);
+
+  float roll_rad = -angle_roll * PI / 180.0; float pitch_rad = -angle_pitch * PI / 180.0;
+
+  float mxh = mx_cal * cos(pitch_rad) + mz_cal * sin(pitch_rad);
+  float myh = mx_cal * sin(roll_rad) * sin(pitch_rad) + my_cal * cos(roll_rad) - mz_cal * sin(roll_rad) * cos(pitch_rad);
+
+  heading = atan2(myh, mxh) * 180.0 / PI + declination_angle;
+  if (heading < 0) heading += 360.0;
+}
+
+
 void calibrate_gyro() {
   long x_sum = 0, y_sum = 0, z_sum = 0;
 
@@ -446,11 +571,33 @@ uint8_t compute_checksum(const Controller &data) {
       data.JLx < -200 || data.JLx > 200 ||
       data.JRx < -200 || data.JRx > 200 ||
       data.JRy < -200 || data.JRy > 200 ||
-      data.roll < MIN_ANGLE_INPUT || data.roll > MAX_ANGLE_INPUT ||
-      data.pitch < MIN_ANGLE_INPUT || data.pitch > MAX_ANGLE_INPUT) 
+      (data.roll / 100.0) < MIN_ANGLE_INPUT || (data.roll / 100.0) > MAX_ANGLE_INPUT ||
+      (data.pitch / 100.0) < MIN_ANGLE_INPUT || (data.pitch / 100.0) > MAX_ANGLE_INPUT) 
     {
-      return -1;  
+      return 0;  
     } 
 
   return sum;
+}
+
+
+float battery_status() {
+  int pin_reading = analogRead(BATTERY_PIN);
+  float pin_voltage = pin_reading * 5.0 / 1023.0;
+  float battery_voltage = pin_voltage * 2; // Because the voltage devider is a 1/2 divider
+  
+  if (battery_voltage <= 8.4 && battery_voltage > 7.4) {
+    // 0 -> fully on, 255 -> fully off
+    analogWrite(BAT_R_LED, 255);
+    analogWrite(BAT_G_LED, 0);
+  } else if (battery_voltage <= 7.4 && battery_voltage > 7.0) {
+    analogWrite(BAT_R_LED, 0);
+    analogWrite(BAT_G_LED, 0);
+  } else if (battery_voltage <= 7.0 && battery_voltage > 6.0) {
+    analogWrite(BAT_R_LED, 0);
+    analogWrite(BAT_G_LED, 175);
+  } else if (battery_voltage <= 6.0) {
+    analogWrite(BAT_R_LED, 0);
+    analogWrite(BAT_G_LED, 255);
+  }
 }

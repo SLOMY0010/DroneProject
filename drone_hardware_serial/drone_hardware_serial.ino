@@ -197,22 +197,26 @@ void loop() {
       transmission_started = true;
     } else {
       data = old_data;
-      analogWrite(BAT_R_LED, 0);
+      analogWrite(BAT_R_LED, 255);
       analogWrite(BAT_G_LED, 255); // LED will blink red if data was rejected
     }
   }
     
-
-  if (transmission_started) {
-    // This function handles all movement and calculations
-    calculate_update_throttle();
+  if (data.JLy == 0) {
+    analogWrite(BAT_R_LED, 0);
+    analogWrite(BAT_G_LED, 255);
   }
-  // calculate_update_throttle();
+
+  // if (transmission_started) {
+  //   // This function handles all movement and calculations
+  //   calculate_update_throttle();
+  // }
+  calculate_update_throttle();
   // Serial.print("roll: "); Serial.print(angle_roll);
   // Serial.print("    pitch: "); Serial.println(angle_pitch);
 
   // If 10s went by without receiving data, and the throttle have already been changed by previously received data, land the drone.
-  if ((millis() - last_received >= data_waiting_time && transmission_started) || ((data.bools & BTN_B) ? 1 : 0)) { // !data.b means button b was pressed
+  if ((millis() - last_received >= data_waiting_time && transmission_started) || ((data.bools & BTN_B) ? 1 : 0)) { // Pressing B lands the drone
     transmission_started = false;
     descend();
   }
@@ -244,7 +248,7 @@ void calculate_update_throttle() {
   // Pitch and Roll inputs are mapped to -30 to 30 degrees range
   int pitch_input = map(data.JRy, -200, 200, MIN_ANGLE_INPUT, MAX_ANGLE_INPUT), roll_input = map(data.JRx, -200, 200, MIN_ANGLE_INPUT, MAX_ANGLE_INPUT), yaw_input = data.JLx;
   throttle = data.JLy; // A global variable
-
+  
   // If A is pressed, gyro mode is enabled, roll and pitch joystick inputs are ignored.
   if ((data.bools & BTN_A) ? 1 : 0) {
     target_roll = data.roll / 100.0;
@@ -306,13 +310,14 @@ void calculate_update_throttle() {
   int roll = (int) (pid_output_roll * PID_SCALE_FACTOR);
   int pitch = (int) (pid_output_pitch * PID_SCALE_FACTOR);
 
-
   m1 = constrain(throttle + pitch + roll + yaw_input, MIN_SPEED, MAX_SPEED);   // Front-left
   m2 = constrain(throttle + pitch - roll - yaw_input, MIN_SPEED, MAX_SPEED);   // Front-right
   m3 = constrain(throttle - pitch - roll + yaw_input, MIN_SPEED, MAX_SPEED);   // Back-right
   m4 = constrain(throttle - pitch + roll - yaw_input, MIN_SPEED, MAX_SPEED);   // Back-left
 
-  
+  // Serial.print("m1: "); Serial.print(m1); Serial.print("    m2: "); Serial.print(m2);
+  // Serial.print("    m3: "); Serial.print(m3); Serial.print("    m4: "); Serial.println(m4);
+
   // Update the speed of each motor
   update_throttle(m1, m2, m3, m4);
 }
@@ -555,8 +560,8 @@ uint8_t compute_checksum(const Controller &data) {
       data.JLx < -200 || data.JLx > 200 ||
       data.JRx < -200 || data.JRx > 200 ||
       data.JRy < -200 || data.JRy > 200 ||
-      data.roll < MIN_ANGLE_INPUT || data.roll / 100.0 > MAX_ANGLE_INPUT ||
-      data.pitch < MIN_ANGLE_INPUT || data.pitch / 100.0 > MAX_ANGLE_INPUT) 
+      (data.roll / 100.0) < MIN_ANGLE_INPUT || (data.roll / 100.0) > MAX_ANGLE_INPUT ||
+      (data.pitch / 100.0) < MIN_ANGLE_INPUT || (data.pitch / 100.0) > MAX_ANGLE_INPUT) 
     {
       return -1;  
     } 
