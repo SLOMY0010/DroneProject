@@ -38,10 +38,14 @@ struct Controller {
   uint8_t checksum;
 };
 
+// To set time global variables
+unsigned long now_millis = millis();
+unsigned long now_micros = micros();
+
 /************** Global Variables **************/
 int throttle = 0; 
 unsigned long data_waiting_time = 3000; // The drone will wait for this amoung of milliseconds to receive from the controller, if it does not receive, it will land
-unsigned long last_received = millis();
+unsigned long last_received = now_millis;
 bool transmission_started = false; 
 
 Servo M1, M2, M3, M4; // Motors configuration: M1 front-left, M2 front-right, M3 back-right, M4 back-left.
@@ -59,7 +63,7 @@ float acc_z_bias = 0;
 
 // For the Kalman filter
 
-  unsigned long last_time_kf = micros();
+  unsigned long last_time_kf = now_micros;
 
   // For roll
   float angle_roll = 0.0;
@@ -89,7 +93,7 @@ float acc_z_bias = 0;
   float Ki_roll = 0.05;
   float Kd_roll = 0.02;
 
-  unsigned long last_time_pid_roll = micros();
+  unsigned long last_time_pid_roll = now_micros;
 
   // For pitch
   float target_pitch = 0.0;
@@ -100,7 +104,7 @@ float acc_z_bias = 0;
   float Ki_pitch = 0.05;
   float Kd_pitch = 0.02;
 
-  unsigned long last_time_pid_pitch = micros();
+  unsigned long last_time_pid_pitch = now_micros;
 
   // For yaw
   float target_yaw;
@@ -113,7 +117,7 @@ float acc_z_bias = 0;
 
   bool got_target_yaw = false;
 
-  unsigned long last_time_pid_yaw = micros();
+  unsigned long last_time_pid_yaw = now_micros;
 
 // For the Magnetometer (compass)
   QMC5883LCompass compass;
@@ -133,6 +137,9 @@ Controller data;
 void setup() {
   pinMode(BAT_G_LED, OUTPUT);
   pinMode(BAT_R_LED, OUTPUT);
+  // Set led to red
+  analogWrite(BAT_G_LED, 255);
+  analogWrite(BAT_R_LED, 0);
 
   data.JLy = MIN_SPEED;
   data.JLx = 0;
@@ -187,6 +194,10 @@ void setup() {
   compass.init();
 
   Serial.begin(9600);
+
+  // Turn off LED to indicate end of setup
+  analogWrite(BAT_G_LED, 255);
+  analogWrite(BAT_R_LED, 255);
 }
 
 
@@ -198,11 +209,11 @@ void loop() {
   Controller old_data = data;
   if (Serial.available() >= sizeof(Controller)) {
     Serial.readBytes(((char *) &data), sizeof(Controller)); // Read rest of data
-    last_received = millis();
     analogWrite(BAT_R_LED, 0);
     analogWrite(BAT_G_LED, 175);
 
     if (compute_checksum(data) == data.checksum) {
+      last_received = millis();
       transmission_started = true;
     } else {
       data = old_data;
@@ -210,23 +221,14 @@ void loop() {
       analogWrite(BAT_G_LED, 255); // LED will blink red if data was rejected
     }
   }
-    
-  if (data.JLy == 0) {
-    analogWrite(BAT_R_LED, 0);
-    analogWrite(BAT_G_LED, 255);
-  }
 
-  // if (transmission_started) {
-  //   // This function handles all movement and calculations
-  //   calculate_update_throttle();
-  // }
-  calculate_update_throttle();
-  // Serial.print("roll: "); Serial.print(angle_roll);
-  // Serial.print("    pitch: "); Serial.println(angle_pitch);
+  if (transmission_started) {
+    // This function handles all movement and calculations
+    calculate_update_throttle();
+  }
 
   // If 10s went by without receiving data, and the throttle have already been changed by previously received data, land the drone.
   if ((millis() - last_received >= data_waiting_time && transmission_started) || ((data.bools & BTN_B) ? 1 : 0)) { // Pressing B lands the drone
-    transmission_started = false;
     descend();
   }
 }
@@ -575,6 +577,8 @@ void descend() {
   // Reset throttle
   data.JLy = MIN_SPEED;
   throttle = MIN_SPEED;
+
+  transmission_started = false;
 }
 
 
@@ -600,17 +604,16 @@ uint8_t compute_checksum(const Controller &data) {
   return sum;
 }
 
-
-float battery_status() {
+void battery_status() {
   int pin_reading = analogRead(BATTERY_PIN);
   float pin_voltage = pin_reading * 5.0 / 1023.0;
   float battery_voltage = pin_voltage * 2; // Because the voltage devider is a 1/2 divider
   
-  if (battery_voltage <= 8.4 && battery_voltage > 7.4) {
+  if (battery_voltage >= 7.4) {
     // 0 -> fully on, 255 -> fully off
     analogWrite(BAT_R_LED, 255);
     analogWrite(BAT_G_LED, 0);
-  } else if (battery_voltage <= 7.4 && battery_voltage > 7.0) {
+  } else if (battery_voltage < 7.4 && battery_voltage > 7.0) {
     analogWrite(BAT_R_LED, 0);
     analogWrite(BAT_G_LED, 0);
   } else if (battery_voltage <= 7.0 && battery_voltage > 6.0) {
