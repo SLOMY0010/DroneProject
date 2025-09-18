@@ -218,7 +218,7 @@ void loop() {
     } else {
       data = old_data;
       analogWrite(BAT_R_LED, 255);
-      analogWrite(BAT_G_LED, 255); // LED will blink red if data was rejected
+      analogWrite(BAT_G_LED, 255); // LED will blink if data was rejected
     }
   }
 
@@ -348,6 +348,10 @@ void calculate_update_throttle() {
   m3 = constrain(throttle - pitch - roll + yaw_input, MIN_SPEED, MAX_SPEED);   // Back-right
   m4 = constrain(throttle - pitch + roll - yaw_input, MIN_SPEED, MAX_SPEED);   // Back-left
 
+  // If throttle input is off (minimum), ignore mixing equation, motors must be off
+  if (throttle == MIN_SPEED) {
+    m1 = m2 = m3 = m4 = MIN_SPEED;
+  }
   // Serial.print("m1: "); Serial.print(m1); Serial.print("    m2: "); Serial.print(m2);
   // Serial.print("    m3: "); Serial.print(m3); Serial.print("    m4: "); Serial.println(m4);
 
@@ -568,15 +572,34 @@ void calibrate_acc() {
 
 
 void descend() {
-  // Slowly decrease the throttle of all motors equally
-  for (int i = throttle; i >= MIN_SPEED; i -= 20) {
-    update_throttle(i, i, i, i);
-    delay(1000);
+  unsigned long last_reduced_throttle = millis();
+  bool led_blink = 1;
+
+  // Reset inputs to focus on landing
+  data.bools = 0; data.JLy = throttle; data.JLx = 0; data.JRx = 0; data.JRy = 0;
+  
+  while (throttle > MIN_SPEED) { // This loop imitates the loop() function, but data input is processed and throttle reduced to land the drone
+    if (millis() - last_reduced_throttle >= 1000) {
+      data.JLy -= 20;
+      last_reduced_throttle = millis();
+
+      // Blink the led while keeping the color respective to the battery status
+      if (led_blink = !led_blink) {
+        battery_status();
+      } else {
+        analogWrite(BAT_G_LED, 255);
+        analogWrite(BAT_R_LED, 255);
+      }
+    }
+
+    calculate_update_throttle();
   }
 
   // Reset throttle
   data.JLy = MIN_SPEED;
   throttle = MIN_SPEED;
+
+  got_target_yaw = false;
 
   transmission_started = false;
 }
