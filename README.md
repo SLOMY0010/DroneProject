@@ -147,12 +147,12 @@ Simplified structure:
 
 ```cpp
 struct Controller {
-    uint8_t bools; // Buttons and switches
-    int16_t roll, pitch;
-    int16_t JLx, JLy, JRx, JRy;
-    int16_t PL, PR;
-    uint8_t checksum;
-};
+    uint8_t bools; // Buttons & switches
+    int16_t roll, pitch; // MPU-6050 Readings
+    int16_t JLx, JLy, JRx, JRy; // Joysticks input
+    int16_t PL, PR; // Potentiometers
+    uint8_t checksum; 
+}; // 18-Bytes
 ```
 
 The checksum is calculated using XOR over the packet bytes. On the drone side, packets are rejected if the checksum is invalid or if important values are outside expected limits.
