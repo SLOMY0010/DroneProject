@@ -147,7 +147,7 @@ Simplified structure:
 
 ```cpp
 struct Controller {
-    uint8_t bools;
+    uint8_t bools; // Buttons and switches
     int16_t roll, pitch;
     int16_t JLx, JLy, JRx, JRy;
     int16_t PL, PR;
